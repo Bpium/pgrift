@@ -8,13 +8,18 @@
   "main": "index.js",
   "scripts": {
     "dev": "npx tsx migrate.ts",
-    "verify": "npx tsx verify.ts"
+    "verify": "npx tsx verify.ts",
+    "create-db": "npx tsx scripts/createRandomDb.ts",
+    "heavy": "npx tsx scripts/heavy.ts"
   },
   "dependencies": {
+    "dotenv": "^17.3.1",
+    "p-map": "^7.0.4",
     "pg": "^8.18.0"
   },
   "devDependencies": {
     "@types/pg": "^8.16.0",
+    "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
