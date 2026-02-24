@@ -96,13 +96,6 @@ async function getTenants(): Promise<string[]> {
   });
 }
 
-async function createSchema(schemaName: string): Promise<void> {
-  await withClient(CONFIG.target, async (client) => {
-    await client.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
-    await client.query(`CREATE SCHEMA "${schemaName}"`);
-  });
-}
-
 // ─── disk space guard ────────────────────────────────────────────────────────
 
 function getFreeBytesOnDir(dir: string): number {
@@ -123,34 +116,12 @@ function assertDiskSpace(dir: string, minBytes = 512 * 1024 * 1024 /* 512 MB */)
   }
 }
 
-// ─── migration ───────────────────────────────────────────────────────────────
-
-async function migrateExtensions(dbName: string): Promise<void> {
-  // Получаем список extensions из source БД и устанавливаем их в target
-  const extensions = await withClient({ ...CONFIG.source, database: dbName }, async (client) => {
-    const { rows } = await client.query<{ extname: string; extversion: string }>(
-      `SELECT extname, extversion FROM pg_extension
-         WHERE extname != 'plpgsql'  -- plpgsql уже есть в любой БД
-         ORDER BY extname`,
-    );
-    return rows;
-  });
-
-  if (extensions.length === 0) return;
-
-  await withClient(CONFIG.target, async (client) => {
-    for (const { extname } of extensions) {
-      // Если extension не поддерживает установку в произвольную схему — бросаем ошибку.
-      // Глобальная установка нам не нужна: тенант должен быть полностью изолирован в своей схеме.
-      await client.query(`CREATE EXTENSION IF NOT EXISTS "${extname}" WITH SCHEMA "${dbName}"`);
-      log("info", `  extension ${extname} installed into schema "${dbName}"`);
-    }
-  });
-}
+// ─── migration (новый подход через промежуточную БД) ────────────────────────
 
 async function migrateTenant(dbName: string): Promise<void> {
-  const dumpSchemaFile = path.join(CONFIG.dumpDir, `${dbName}.schema.sql`);
-  const dumpDataFile = path.join(CONFIG.dumpDir, `${dbName}.data.sql`);
+  const dumpFile = path.join(CONFIG.dumpDir, `${dbName}.dump`);
+  const finalDumpFile = path.join(CONFIG.dumpDir, `${dbName}.final.dump`);
+  const tempDbName = `_temp_migration_${dbName}`;
 
   const src = CONFIG.source;
   const tgt = CONFIG.target;
@@ -160,12 +131,11 @@ async function migrateTenant(dbName: string): Promise<void> {
 
   assertDiskSpace(CONFIG.dumpDir);
 
-  await createSchema(dbName);
-
   try {
     // ─────────────────────────────
-    // 1️⃣ Дамп схемы
+    // 1️⃣ Дамп исходной БД
     // ─────────────────────────────
+    log("info", `  [${dbName}] dumping source database...`);
     exec(
       [
         "pg_dump",
@@ -173,129 +143,93 @@ async function migrateTenant(dbName: string): Promise<void> {
         `-p ${src.port}`,
         `-U "${src.user}"`,
         `-d "${dbName}"`,
-        `-n public`,
-        `--schema-only`,
         `--no-owner`,
         `--no-acl`,
-        `--exclude-table-data='*'`,
-        `-f "${dumpSchemaFile}"`,
+        `-f "${dumpFile}"`,
       ].join(" "),
       srcPw,
     );
 
-    // Убираем CREATE SCHEMA public и CREATE FUNCTION для глобальных функций
-    {
-      const lines = fs.readFileSync(dumpSchemaFile, "utf8").split("\n");
-      const filtered: string[] = [];
-      let inFunction = false;
-      let dollarCount = 0;
-
-      for (const line of lines) {
-        // Пропускаем CREATE SCHEMA и связанные команды
-        if (
-          line.startsWith("CREATE SCHEMA") ||
-          line.startsWith("COMMENT ON SCHEMA") ||
-          line.startsWith("ALTER SCHEMA")
-        ) {
-          continue;
-        }
-
-        // Определяем начало функции bpiumdateparse
-        if (!inFunction && /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+bpiumdateparse/i.test(line)) {
-          inFunction = true;
-          dollarCount = 0;
-          continue;
-        }
-
-        // Если внутри функции - пропускаем и считаем $$
-        if (inFunction) {
-          // Считаем количество $$ в строке
-          const matches = line.match(/\$\$/g);
-          if (matches) {
-            dollarCount += matches.length;
-          }
-
-          // После второго $$ (закрывающего) ищем точку с запятой
-          if (dollarCount >= 2) {
-            if (line.includes(";")) {
-              inFunction = false;
-              dollarCount = 0;
-            }
-          }
-          continue;
-        }
-
-        filtered.push(line);
-      }
-
-      fs.writeFileSync(dumpSchemaFile, filtered.join("\n"));
-    }
-
     // ─────────────────────────────
-    // 2️⃣ Создаём глобальные функции (только один раз)
+    // 2️⃣ Создаём временную БД на target сервере
     // ─────────────────────────────
-    await withClient(CONFIG.target, async (client) => {
-      // Проверяем, существует ли уже функция bpiumdateparse
-      const { rows } = await client.query(`SELECT 1 FROM pg_proc WHERE proname = 'bpiumdateparse'`);
-
-      if (rows.length === 0) {
-        // Получаем определение функции из исходной БД
-        const funcDef = await withClient({ ...CONFIG.source, database: dbName }, async (srcClient) => {
-          const { rows: funcRows } = await srcClient.query<{ definition: string }>(
-            `SELECT pg_get_functiondef(oid) AS definition 
-             FROM pg_proc 
-             WHERE proname = 'bpiumdateparse'`,
-          );
-          return funcRows[0]?.definition;
-        });
-
-        if (funcDef) {
-          // Создаём функцию в public схеме целевой БД
-          await client.query(funcDef);
-          log("info", `  created global function bpiumdateparse`);
-        }
-      }
+    log("info", `  [${dbName}] creating temp database...`);
+    await withClient({ ...tgt, database: "postgres" }, async (client) => {
+      await client.query(`DROP DATABASE IF EXISTS "${tempDbName}"`);
+      await client.query(`CREATE DATABASE "${tempDbName}"`);
     });
 
     // ─────────────────────────────
-    // 3️⃣ Заливаем схему
+    // 3️⃣ Восстанавливаем во временную БД
     // ─────────────────────────────
+    log("info", `  [${dbName}] restoring to temp database...`);
     exec(
       [
         "psql",
         `-h "${tgt.host}"`,
         `-p ${tgt.port}`,
         `-U "${tgt.user}"`,
-        `-d "${tgt.database}"`,
-        `-v ON_ERROR_STOP=1`,
-        `-c "SET search_path='${dbName}',public"`, // Добавляем public в search_path для доступа к функциям
-        `-f "${dumpSchemaFile}"`,
+        `-d "${tempDbName}"`,
+        `-v ON_ERROR_STOP=0`, // Игнорируем ошибки при восстановлении
+        `-f "${dumpFile}"`,
       ].join(" "),
       tgtPw,
     );
 
     // ─────────────────────────────
-    // 4️⃣ Дамп данных
+    // 4️⃣ Переименовываем схему public в имя тенанта
     // ─────────────────────────────
+    log("info", `  [${dbName}] renaming schema...`);
+    await withClient({ ...tgt, database: tempDbName }, async (client) => {
+      await client.query(`ALTER SCHEMA public RENAME TO "${dbName}"`);
+      // Создаём новую пустую схему public чтобы pg_dump работал корректно
+      await client.query(`CREATE SCHEMA public`);
+    });
+
+    // ─────────────────────────────
+    // 5️⃣ Дампим переименованную схему
+    // ─────────────────────────────
+    log("info", `  [${dbName}] dumping renamed schema...`);
     exec(
       [
         "pg_dump",
-        `-h "${src.host}"`,
-        `-p ${src.port}`,
-        `-U "${src.user}"`,
-        `-d "${dbName}"`,
-        `-n public`,
-        `--data-only`,
+        `-h "${tgt.host}"`,
+        `-p ${tgt.port}`,
+        `-U "${tgt.user}"`,
+        `-d "${tempDbName}"`,
+        `-n "${dbName}"`, // Дампим именно переименованную схему
         `--no-owner`,
         `--no-acl`,
-        `-f "${dumpDataFile}"`,
+        `-f "${finalDumpFile}"`,
       ].join(" "),
-      srcPw,
+      tgtPw,
     );
 
     // ─────────────────────────────
-    // 5️⃣ Заливаем данные
+    // 6️⃣ Удаляем временную БД
     // ─────────────────────────────
+    log("info", `  [${dbName}] dropping temp database...`);
+    await withClient({ ...tgt, database: "postgres" }, async (client) => {
+      // Принудительно закрываем все соединения к временной БД
+      await client.query(`
+        SELECT pg_terminate_backend(pid)
+        FROM pg_stat_activity
+        WHERE datname = '${tempDbName}' AND pid <> pg_backend_pid()
+      `);
+      await client.query(`DROP DATABASE IF EXISTS "${tempDbName}"`);
+    });
+
+    // ─────────────────────────────
+    // 7️⃣ Восстанавливаем в целевую БД
+    // ─────────────────────────────
+    log("info", `  [${dbName}] restoring to target database...`);
+
+    // Удаляем схему если существует
+    await withClient(tgt, async (client) => {
+      await client.query(`DROP SCHEMA IF EXISTS "${dbName}" CASCADE`);
+    });
+
+    // Восстанавливаем
     exec(
       [
         "psql",
@@ -304,31 +238,36 @@ async function migrateTenant(dbName: string): Promise<void> {
         `-U "${tgt.user}"`,
         `-d "${tgt.database}"`,
         `-v ON_ERROR_STOP=1`,
-        `-c "SET search_path='${dbName}',public"`, // Добавляем public в search_path
-        `-f "${dumpDataFile}"`,
+        `-f "${finalDumpFile}"`,
       ].join(" "),
       tgtPw,
     );
+
+    log("info", `  [${dbName}] migration completed`);
   } finally {
-    if (fs.existsSync(dumpSchemaFile)) fs.unlinkSync(dumpSchemaFile);
-    if (fs.existsSync(dumpDataFile)) fs.unlinkSync(dumpDataFile);
+    // Очистка временных файлов
+    if (fs.existsSync(dumpFile)) fs.unlinkSync(dumpFile);
+    if (fs.existsSync(finalDumpFile)) fs.unlinkSync(finalDumpFile);
+
+    // Очистка временной БД на случай если что-то пошло не так
+    try {
+      await withClient({ ...tgt, database: "postgres" }, async (client) => {
+        await client.query(`
+          SELECT pg_terminate_backend(pid)
+          FROM pg_stat_activity
+          WHERE datname = '${tempDbName}' AND pid <> pg_backend_pid()
+        `);
+        await client.query(`DROP DATABASE IF EXISTS "${tempDbName}"`);
+      });
+    } catch {
+      // Игнорируем ошибки при очистке
+    }
   }
 }
 
 // ─── verification ────────────────────────────────────────────────────────────
 
-/**
- * Строим контрольную сумму таблицы через агрегацию md5 по всем строкам.
- *
- * Подход: приводим каждую строку к тексту через ROW()::text, берём md5,
- * затем md5 от конкатенации всех md5 в порядке сортировки по всем колонкам.
- * Это детерминированно при одинаковом порядке строк и данных.
- *
- * Для очень больших таблиц (>10M строк) это может быть медленно —
- * в таких случаях можно ограничиться только COUNT, выставив skipChecksumAbove в CONFIG.
- */
 async function tableChecksum(client: Client, schema: string, table: string): Promise<string> {
-  // Получаем колонки в детерминированном порядке для ORDER BY
   const { rows: cols } = await client.query<{ column_name: string }>(
     `SELECT column_name
      FROM information_schema.columns
@@ -358,7 +297,6 @@ async function verifyMigration(dbName: string): Promise<{ ok: boolean; reasons: 
 
   await withClient({ ...CONFIG.source, database: dbName }, async (srcClient) => {
     await withClient(CONFIG.target, async (tgtClient) => {
-      // 1. Список таблиц
       const { rows: srcTables } = await srcClient.query<{ table_name: string }>(
         `SELECT table_name FROM information_schema.tables
          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -382,7 +320,6 @@ async function verifyMigration(dbName: string): Promise<{ ok: boolean; reasons: 
       for (const table of srcTableNames) {
         if (!tgtTableNames.has(table)) continue;
 
-        // 2. Количество строк
         const { rows: srcCnt } = await srcClient.query<{ cnt: string }>(
           `SELECT COUNT(*)::text AS cnt FROM public."${table}"`,
         );
@@ -395,12 +332,9 @@ async function verifyMigration(dbName: string): Promise<{ ok: boolean; reasons: 
 
         if (srcCount !== tgtCount) {
           reasons.push(`${table}: row count mismatch (src: ${srcCount}, tgt: ${tgtCount})`);
-          // Контрольную сумму считать бессмысленно если количество строк уже расходится
           continue;
         }
 
-        // 3. Контрольная сумма данных
-        //    Пропускаем для очень больших таблиц если задан порог в конфиге
         const rowCount = parseInt(srcCount, 10);
         const skipAbove = (CONFIG as any).skipChecksumAboveRows as number | undefined;
 

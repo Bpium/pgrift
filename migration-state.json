@@ -1,0 +1,157 @@
+{
+  "completed": [],
+  "failed": [
+    {
+      "db": "bench_db_1",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_1.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_1.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_1.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_10",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_10.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_10.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_10.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_100",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_100.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_100.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_100.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_1000",
+      "error": "read ECONNRESET",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_101",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_101.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_101.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_101.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_102",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_102.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_102.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_102.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_103",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_103.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_103.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_103.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_104",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_104.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_104.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_104.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_105",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_105.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_105.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_105.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_106",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_106.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_106.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_106.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_107",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_107.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_107.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_107.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_108",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_108.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_108.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_108.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_109",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_109.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_109.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_109.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_11",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_11.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_11.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_11.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_110",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_110.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_110.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_110.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_111",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_111.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_111.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_111.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_112",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_112.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_112.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_112.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_113",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_113.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_113.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_113.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_114",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_114.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_114.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_114.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_115",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_115.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_115.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_115.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_116",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_116.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_116.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_116.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_117",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_117.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_117.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_117.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_118",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_118.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_118.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_118.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_119",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_119.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_119.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_119.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_12",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_12.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_12.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_12.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_120",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_120.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_120.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_120.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_121",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_121.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_121.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_121.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_122",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_122.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_122.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_122.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_123",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_123.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_123.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_123.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    },
+    {
+      "db": "bench_db_124",
+      "error": "Command failed: psql -h \"localhost\" -p 5432 -U \"postgres\" -d \"tenants\" -v ON_ERROR_STOP=1 -f \"C:\\Users\\Satoru\\Desktop\\main\\pgrift\\tmp\\bench_db_124.final.dump\"\npsql:C:/Users/Satoru/Desktop/main/pgrift/tmp/bench_db_124.final.dump:13396: ОШИБКА:  класс операторов \"bench_db_124.gin_trgm_ops\" для метода доступа \"gin\" не существует\r\n",
+      "attempts": 1
+    }
+  ],
+  "startedAt": "2026-02-24T13:42:10.097Z",
+  "lastUpdated": "2026-02-24T13:50:37.551Z"
+}
