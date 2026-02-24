@@ -98,7 +98,8 @@ async function getTenants(): Promise<string[]> {
 
 async function createSchema(schemaName: string): Promise<void> {
   await withClient(CONFIG.target, async (client) => {
-    await client.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
+    await client.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
+    await client.query(`CREATE SCHEMA "${schemaName}"`);
   });
 }
 
@@ -148,48 +149,169 @@ async function migrateExtensions(dbName: string): Promise<void> {
 }
 
 async function migrateTenant(dbName: string): Promise<void> {
-  const dumpFile = path.join(CONFIG.dumpDir, `${dbName}.dump`);
+  const dumpSchemaFile = path.join(CONFIG.dumpDir, `${dbName}.schema.sql`);
+  const dumpDataFile = path.join(CONFIG.dumpDir, `${dbName}.data.sql`);
+
   const src = CONFIG.source;
   const tgt = CONFIG.target;
+
   const srcPw = String(src.password ?? "");
   const tgtPw = String(tgt.password ?? "");
 
   assertDiskSpace(CONFIG.dumpDir);
 
-  try {
-    // Extensions ставим до восстановления — они могут быть нужны для типов/функций в дампе
-    await migrateExtensions(dbName);
+  await createSchema(dbName);
 
-    // Dump в custom binary format — надёжно, быстрее, не требует regex-замен
+  try {
+    // ─────────────────────────────
+    // 1️⃣ Дамп схемы
+    // ─────────────────────────────
     exec(
-      `pg_dump -Fc ` +
-        `-h ${src.host} -p ${src.port} -U ${src.user} ` +
-        `-n public ` + // только public schema
-        `--no-owner --no-acl ` + // права не переносим, они будут свои
-        `-d "${dbName}" ` +
-        `-f "${dumpFile}"`,
+      [
+        "pg_dump",
+        `-h "${src.host}"`,
+        `-p ${src.port}`,
+        `-U "${src.user}"`,
+        `-d "${dbName}"`,
+        `-n public`,
+        `--schema-only`,
+        `--no-owner`,
+        `--no-acl`,
+        `--exclude-table-data='*'`,
+        `-f "${dumpSchemaFile}"`,
+      ].join(" "),
       srcPw,
     );
 
-    await createSchema(dbName);
+    // Убираем CREATE SCHEMA public и CREATE FUNCTION для глобальных функций
+    {
+      const lines = fs.readFileSync(dumpSchemaFile, "utf8").split("\n");
+      const filtered: string[] = [];
+      let inFunction = false;
+      let dollarCount = 0;
 
-    // Восстанавливаем с явным маппингом схемы: public → dbName
+      for (const line of lines) {
+        // Пропускаем CREATE SCHEMA и связанные команды
+        if (
+          line.startsWith("CREATE SCHEMA") ||
+          line.startsWith("COMMENT ON SCHEMA") ||
+          line.startsWith("ALTER SCHEMA")
+        ) {
+          continue;
+        }
+
+        // Определяем начало функции bpiumdateparse
+        if (!inFunction && /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+bpiumdateparse/i.test(line)) {
+          inFunction = true;
+          dollarCount = 0;
+          continue;
+        }
+
+        // Если внутри функции - пропускаем и считаем $$
+        if (inFunction) {
+          // Считаем количество $$ в строке
+          const matches = line.match(/\$\$/g);
+          if (matches) {
+            dollarCount += matches.length;
+          }
+
+          // После второго $$ (закрывающего) ищем точку с запятой
+          if (dollarCount >= 2) {
+            if (line.includes(";")) {
+              inFunction = false;
+              dollarCount = 0;
+            }
+          }
+          continue;
+        }
+
+        filtered.push(line);
+      }
+
+      fs.writeFileSync(dumpSchemaFile, filtered.join("\n"));
+    }
+
+    // ─────────────────────────────
+    // 2️⃣ Создаём глобальные функции (только один раз)
+    // ─────────────────────────────
+    await withClient(CONFIG.target, async (client) => {
+      // Проверяем, существует ли уже функция bpiumdateparse
+      const { rows } = await client.query(`SELECT 1 FROM pg_proc WHERE proname = 'bpiumdateparse'`);
+
+      if (rows.length === 0) {
+        // Получаем определение функции из исходной БД
+        const funcDef = await withClient({ ...CONFIG.source, database: dbName }, async (srcClient) => {
+          const { rows: funcRows } = await srcClient.query<{ definition: string }>(
+            `SELECT pg_get_functiondef(oid) AS definition 
+             FROM pg_proc 
+             WHERE proname = 'bpiumdateparse'`,
+          );
+          return funcRows[0]?.definition;
+        });
+
+        if (funcDef) {
+          // Создаём функцию в public схеме целевой БД
+          await client.query(funcDef);
+          log("info", `  created global function bpiumdateparse`);
+        }
+      }
+    });
+
+    // ─────────────────────────────
+    // 3️⃣ Заливаем схему
+    // ─────────────────────────────
     exec(
-      `pg_restore -Fc ` +
-        `-h ${tgt.host} -p ${tgt.port} -U ${tgt.user} ` +
-        `-d "${tgt.database}" ` +
-        `--no-owner --no-acl ` +
-        `-n public ` + // читаем из public…
-        `--schema="${dbName}" ` + // …кладём в схему dbName (pg_restore 16+)
-        // для старых версий pg_restore используй --target-schema вместо --schema
-        `"${dumpFile}"`,
+      [
+        "psql",
+        `-h "${tgt.host}"`,
+        `-p ${tgt.port}`,
+        `-U "${tgt.user}"`,
+        `-d "${tgt.database}"`,
+        `-v ON_ERROR_STOP=1`,
+        `-c "SET search_path='${dbName}',public"`, // Добавляем public в search_path для доступа к функциям
+        `-f "${dumpSchemaFile}"`,
+      ].join(" "),
+      tgtPw,
+    );
+
+    // ─────────────────────────────
+    // 4️⃣ Дамп данных
+    // ─────────────────────────────
+    exec(
+      [
+        "pg_dump",
+        `-h "${src.host}"`,
+        `-p ${src.port}`,
+        `-U "${src.user}"`,
+        `-d "${dbName}"`,
+        `-n public`,
+        `--data-only`,
+        `--no-owner`,
+        `--no-acl`,
+        `-f "${dumpDataFile}"`,
+      ].join(" "),
+      srcPw,
+    );
+
+    // ─────────────────────────────
+    // 5️⃣ Заливаем данные
+    // ─────────────────────────────
+    exec(
+      [
+        "psql",
+        `-h "${tgt.host}"`,
+        `-p ${tgt.port}`,
+        `-U "${tgt.user}"`,
+        `-d "${tgt.database}"`,
+        `-v ON_ERROR_STOP=1`,
+        `-c "SET search_path='${dbName}',public"`, // Добавляем public в search_path
+        `-f "${dumpDataFile}"`,
+      ].join(" "),
       tgtPw,
     );
   } finally {
-    // Удаляем dump в любом случае — не оставляем чувствительные данные на диске
-    if (fs.existsSync(dumpFile)) {
-      fs.unlinkSync(dumpFile);
-    }
+    if (fs.existsSync(dumpSchemaFile)) fs.unlinkSync(dumpSchemaFile);
+    if (fs.existsSync(dumpDataFile)) fs.unlinkSync(dumpDataFile);
   }
 }
 
