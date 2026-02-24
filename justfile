@@ -2,7 +2,7 @@ _default:
 	@just --list --unsorted
 
 # Run pgrift migrate
-dev:
+migrate:
 	npm run dev
 
 # Cleanup database schemas
