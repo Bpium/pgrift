@@ -7,6 +7,7 @@
  */
 
 import { Client } from "pg";
+import fs from "fs";
 import { CONFIG } from "./config";
 
 async function cleanupSchemas(): Promise<void> {
@@ -33,11 +34,21 @@ async function cleanupSchemas(): Promise<void> {
 
     if (schemas.length === 0) {
       console.log("No custom schemas found");
-      return;
+    } else {
+      console.log(`Found ${schemas.length} schemas to delete:`);
+      schemas.forEach((schema: string) => console.log(`  ${schema}`));
     }
 
-    console.log(`Found ${schemas.length} schemas to delete:`);
-    schemas.forEach((schema: string) => console.log(`  ${schema}`));
+    // Delete state file if exists
+    if (fs.existsSync(CONFIG.stateFile)) {
+      fs.unlinkSync(CONFIG.stateFile);
+      console.log("Deleted state file:", CONFIG.stateFile);
+    }
+
+    if (schemas.length === 0) {
+      console.log("Cleanup complete");
+      return;
+    }
 
     // Confirmation
     const readline = require("readline").createInterface({
@@ -69,7 +80,7 @@ async function cleanupSchemas(): Promise<void> {
           WHERE datname = $1 
             AND pid <> pg_backend_pid()
             AND query LIKE $2
-        `,
+          `,
           [CONFIG.target.database, `%${schema}%`],
         );
 

@@ -151,12 +151,34 @@ async function migrateTenant(dbName: string): Promise<void> {
     );
 
     // ─────────────────────────────
-    // 2️⃣ Создаём временную БД на target сервере
+    // 2️⃣ Создаём временную БД на target сервере и устанавливаем extensions
     // ─────────────────────────────
     log("info", `  [${dbName}] creating temp database...`);
     await withClient({ ...tgt, database: "postgres" }, async (client) => {
       await client.query(`DROP DATABASE IF EXISTS "${tempDbName}"`);
       await client.query(`CREATE DATABASE "${tempDbName}"`);
+    });
+
+    // Устанавливаем pg_trgm в public схему временной БД до восстановления дампа
+    log("info", `  [${dbName}] installing extensions...`);
+    await withClient({ ...tgt, database: tempDbName }, async (client) => {
+      // Получаем список extensions из исходной БД
+      const extensions = await withClient({ ...src, database: dbName }, async (srcClient) => {
+        const { rows } = await srcClient.query<{ extname: string }>(
+          `SELECT extname FROM pg_extension WHERE extname != 'plpgsql' ORDER BY extname`,
+        );
+        return rows.map((r) => r.extname);
+      });
+
+      // Устанавливаем каждое расширение в public схему
+      for (const extname of extensions) {
+        try {
+          await client.query(`CREATE EXTENSION IF NOT EXISTS "${extname}" WITH SCHEMA public`);
+          log("info", `  [${dbName}] installed extension: ${extname}`);
+        } catch (err) {
+          log("warn", `  [${dbName}] failed to install ${extname}: ${err}`);
+        }
+      }
     });
 
     // ─────────────────────────────
@@ -224,9 +246,25 @@ async function migrateTenant(dbName: string): Promise<void> {
     // ─────────────────────────────
     log("info", `  [${dbName}] restoring to target database...`);
 
-    // Удаляем схему если существует
+    // Удаляем схему если существует и устанавливаем необходимые extensions
     await withClient(tgt, async (client) => {
       await client.query(`DROP SCHEMA IF EXISTS "${dbName}" CASCADE`);
+
+      // Устанавливаем extensions в public схему целевой БД
+      const extensions = await withClient({ ...src, database: dbName }, async (srcClient) => {
+        const { rows } = await srcClient.query<{ extname: string }>(
+          `SELECT extname FROM pg_extension WHERE extname != 'plpgsql' ORDER BY extname`,
+        );
+        return rows.map((r) => r.extname);
+      });
+
+      for (const extname of extensions) {
+        try {
+          await client.query(`CREATE EXTENSION IF NOT EXISTS "${extname}" WITH SCHEMA public`);
+        } catch (err) {
+          // Игнорируем ошибки - extension может быть уже установлено
+        }
+      }
     });
 
     // Восстанавливаем
