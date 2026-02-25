@@ -138,26 +138,62 @@ function assertDiskSpace(
   }
 }
 
-// ─── migration (новый подход через промежуточную БД) ────────────────────────
+// ─── migration (in-place: переименование схемы в исходной БД, без временной БД)
 
 async function migrateTenant(dbName: string): Promise<void> {
-  const dumpFile = path.join(CONFIG.dumpDir, `${dbName}.dump`);
   const finalDumpFile = path.join(CONFIG.dumpDir, `${dbName}.final.dump`);
-  const tempDbName = `_temp_migration_${dbName}`;
 
   const src = CONFIG.source;
   const tgt = CONFIG.target;
 
   const srcPw = String(src.password ?? "");
   const tgtPw = String(tgt.password ?? "");
+  const dbNameEsc = dbName.replace(/"/g, '""');
 
   assertDiskSpace(CONFIG.dumpDir);
 
+  const extensions = await withClient(
+    { ...src, database: dbName },
+    async (client) => {
+      const { rows } = await client.query<{ extname: string }>(
+        `SELECT extname FROM pg_extension WHERE extname != 'plpgsql' ORDER BY extname`,
+      );
+      return rows.map((r) => r.extname);
+    },
+  );
+
+  let rollbackNeeded = false;
   try {
     // ─────────────────────────────
-    // 1️⃣ Дамп исходной БД
+    // 1️⃣ Закрываем все соединения к исходной БД
     // ─────────────────────────────
-    log("info", `  [${dbName}] dumping source database...`);
+    log("info", `  [${dbName}] terminating connections...`);
+    await withClient({ ...src, database: "postgres" }, async (client) => {
+      await client.query(
+        `SELECT pg_terminate_backend(pid)
+         FROM pg_stat_activity
+         WHERE datname = $1 AND pid <> pg_backend_pid()`,
+        [dbName],
+      );
+    });
+
+    // ─────────────────────────────
+    // 2️⃣ Переименовываем public → dbName, создаём пустую public, ставим search_path
+    // ─────────────────────────────
+    log("info", `  [${dbName}] renaming schema in source...`);
+    await withClient({ ...src, database: dbName }, async (client) => {
+      await client.query(`ALTER SCHEMA public RENAME TO "${dbNameEsc}"`);
+      await client.query(`CREATE SCHEMA public`);
+      await client.query(
+        `ALTER DATABASE "${dbNameEsc}" SET search_path = '"${dbNameEsc}"'`,
+      );
+    });
+    rollbackNeeded = true;
+
+    // ─────────────────────────────
+    // 3️⃣ Дампим переименованную схему из исходной БД
+    // ─────────────────────────────
+    log("info", `  [${dbName}] dumping renamed schema...`);
     exec(
       [
         "pg_dump",
@@ -165,128 +201,32 @@ async function migrateTenant(dbName: string): Promise<void> {
         `-p ${src.port}`,
         `-U "${src.user}"`,
         `-d "${dbName}"`,
+        `-n "${dbName}"`,
         `--no-owner`,
         `--no-acl`,
-        `-f "${dumpFile}"`,
+        `-f "${finalDumpFile}"`,
       ].join(" "),
       srcPw,
     );
 
     // ─────────────────────────────
-    // 2️⃣ Создаём временную БД на target сервере и устанавливаем extensions
+    // 4️⃣ Откат: восстанавливаем схему public и search_path в исходной БД
     // ─────────────────────────────
-    log("info", `  [${dbName}] creating temp database...`);
-    await withClient({ ...tgt, database: "postgres" }, async (client) => {
-      await client.query(`DROP DATABASE IF EXISTS "${tempDbName}"`);
-      await client.query(`CREATE DATABASE "${tempDbName}"`);
+    log("info", `  [${dbName}] rolling back source schema...`);
+    await withClient({ ...src, database: dbName }, async (client) => {
+      await client.query(`ALTER DATABASE "${dbNameEsc}" RESET search_path`);
+      await client.query(`DROP SCHEMA public`);
+      await client.query(`ALTER SCHEMA "${dbNameEsc}" RENAME TO public`);
     });
-
-    // Устанавливаем pg_trgm в public схему временной БД до восстановления дампа
-    log("info", `  [${dbName}] installing extensions...`);
-    await withClient({ ...tgt, database: tempDbName }, async (client) => {
-      // Получаем список extensions из исходной БД
-      const extensions = await withClient(
-        { ...src, database: dbName },
-        async (srcClient) => {
-          const { rows } = await srcClient.query<{ extname: string }>(
-            `SELECT extname FROM pg_extension WHERE extname != 'plpgsql' ORDER BY extname`,
-          );
-          return rows.map((r) => r.extname);
-        },
-      );
-
-      // Устанавливаем каждое расширение в public схему
-      for (const extname of extensions) {
-        try {
-          await client.query(
-            `CREATE EXTENSION IF NOT EXISTS "${extname}" WITH SCHEMA public`,
-          );
-          log("info", `  [${dbName}] installed extension: ${extname}`);
-        } catch (err) {
-          log("warn", `  [${dbName}] failed to install ${extname}: ${err}`);
-        }
-      }
-    });
+    rollbackNeeded = false;
 
     // ─────────────────────────────
-    // 3️⃣ Восстанавливаем во временную БД
-    // ─────────────────────────────
-    log("info", `  [${dbName}] restoring to temp database...`);
-    exec(
-      [
-        "psql",
-        `-h "${tgt.host}"`,
-        `-p ${tgt.port}`,
-        `-U "${tgt.user}"`,
-        `-d "${tempDbName}"`,
-        `-v ON_ERROR_STOP=0`, // Игнорируем ошибки при восстановлении
-        `-f "${dumpFile}"`,
-      ].join(" "),
-      tgtPw,
-    );
-
-    // ─────────────────────────────
-    // 4️⃣ Переименовываем схему public в имя тенанта
-    // ─────────────────────────────
-    log("info", `  [${dbName}] renaming schema...`);
-    await withClient({ ...tgt, database: tempDbName }, async (client) => {
-      await client.query(`ALTER SCHEMA public RENAME TO "${dbName}"`);
-      // Создаём новую пустую схему public чтобы pg_dump работал корректно
-      await client.query(`CREATE SCHEMA public`);
-    });
-
-    // ─────────────────────────────
-    // 5️⃣ Дампим переименованную схему
-    // ─────────────────────────────
-    log("info", `  [${dbName}] dumping renamed schema...`);
-    exec(
-      [
-        "pg_dump",
-        `-h "${tgt.host}"`,
-        `-p ${tgt.port}`,
-        `-U "${tgt.user}"`,
-        `-d "${tempDbName}"`,
-        `-n "${dbName}"`, // Дампим именно переименованную схему
-        `--no-owner`,
-        `--no-acl`,
-        `-f "${finalDumpFile}"`,
-      ].join(" "),
-      tgtPw,
-    );
-
-    // ─────────────────────────────
-    // 6️⃣ Удаляем временную БД
-    // ─────────────────────────────
-    log("info", `  [${dbName}] dropping temp database...`);
-    await withClient({ ...tgt, database: "postgres" }, async (client) => {
-      // Принудительно закрываем все соединения к временной БД
-      await client.query(`
-        SELECT pg_terminate_backend(pid)
-        FROM pg_stat_activity
-        WHERE datname = '${tempDbName}' AND pid <> pg_backend_pid()
-      `);
-      await client.query(`DROP DATABASE IF EXISTS "${tempDbName}"`);
-    });
-
-    // ─────────────────────────────
-    // 7️⃣ Восстанавливаем в целевую БД
+    // 5️⃣ Восстанавливаем в целевую БД
     // ─────────────────────────────
     log("info", `  [${dbName}] restoring to target database...`);
 
-    // Удаляем схему если существует и устанавливаем необходимые extensions
     await withClient(tgt, async (client) => {
-      await client.query(`DROP SCHEMA IF EXISTS "${dbName}" CASCADE`);
-
-      // Устанавливаем extensions в public схему целевой БД
-      const extensions = await withClient(
-        { ...src, database: dbName },
-        async (srcClient) => {
-          const { rows } = await srcClient.query<{ extname: string }>(
-            `SELECT extname FROM pg_extension WHERE extname != 'plpgsql' ORDER BY extname`,
-          );
-          return rows.map((r) => r.extname);
-        },
-      );
+      await client.query(`DROP SCHEMA IF EXISTS "${dbNameEsc}" CASCADE`);
 
       for (const extname of extensions) {
         try {
@@ -294,7 +234,7 @@ async function migrateTenant(dbName: string): Promise<void> {
             `CREATE EXTENSION IF NOT EXISTS "${extname}" WITH SCHEMA public`,
           );
         } catch (err) {
-          // Игнорируем ошибки - extension может быть уже установлено
+          // игнорируем — extension может быть уже установлено
         }
       }
     });
@@ -307,7 +247,6 @@ async function migrateTenant(dbName: string): Promise<void> {
     }
     fs.writeFileSync(finalDumpFile, dumpSql, "utf-8");
 
-    // Восстанавливаем
     exec(
       [
         "psql",
@@ -323,23 +262,19 @@ async function migrateTenant(dbName: string): Promise<void> {
 
     log("info", `  [${dbName}] migration completed`);
   } finally {
-    // Очистка временных файлов
-    if (fs.existsSync(dumpFile)) fs.unlinkSync(dumpFile);
-    if (fs.existsSync(finalDumpFile)) fs.unlinkSync(finalDumpFile);
-
-    // Очистка временной БД на случай если что-то пошло не так
-    try {
-      await withClient({ ...tgt, database: "postgres" }, async (client) => {
-        await client.query(`
-          SELECT pg_terminate_backend(pid)
-          FROM pg_stat_activity
-          WHERE datname = '${tempDbName}' AND pid <> pg_backend_pid()
-        `);
-        await client.query(`DROP DATABASE IF EXISTS "${tempDbName}"`);
-      });
-    } catch {
-      // Игнорируем ошибки при очистке
+    if (rollbackNeeded) {
+      log("warn", `  [${dbName}] rollback after error...`);
+      try {
+        await withClient({ ...src, database: dbName }, async (client) => {
+          await client.query(`ALTER DATABASE "${dbNameEsc}" RESET search_path`);
+          await client.query(`DROP SCHEMA IF EXISTS public`);
+          await client.query(`ALTER SCHEMA "${dbNameEsc}" RENAME TO public`);
+        });
+      } catch (err) {
+        log("error", `  [${dbName}] rollback failed: ${err}`);
+      }
     }
+    if (fs.existsSync(finalDumpFile)) fs.unlinkSync(finalDumpFile);
   }
 }
 
