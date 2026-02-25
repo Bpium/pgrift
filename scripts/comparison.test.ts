@@ -215,6 +215,44 @@ async function getPostgresIOStats(connectionString: string): Promise<PostgresIOS
   }
 }
 
+/** Sum blks_read/blks_hit etc. across multiple databases. Connect to any DB (e.g. postgres) to read pg_stat_database. */
+async function getPostgresIOStatsForDatabases(
+  dbNames: string[],
+  connectionString: string = "postgres://postgres:4321@localhost:5432/postgres",
+): Promise<PostgresIOStats | null> {
+  if (dbNames.length === 0) return null;
+  try {
+    const client = new Client({ connectionString });
+    await client.connect();
+
+    const { rows } = await client.query(
+      `
+      SELECT 
+        ROUND(100.0 * sum(blks_hit) / NULLIF(sum(blks_hit) + sum(blks_read), 0), 2) as hit_pct,
+        sum(blks_read)::bigint as disk_reads,
+        sum(blks_hit)::bigint as cache_hits,
+        sum(temp_files)::bigint as temp_files,
+        sum(temp_bytes)::bigint as temp_bytes
+      FROM pg_stat_database
+      WHERE datname = ANY($1::text[])
+      `,
+      [dbNames],
+    );
+
+    await client.end();
+
+    return {
+      shared_buffers_hit_pct: parseFloat(rows[0]?.hit_pct || "0"),
+      disk_blocks_read: parseInt(rows[0]?.disk_reads || "0", 10),
+      disk_blocks_hit: parseInt(rows[0]?.cache_hits || "0", 10),
+      temp_files: parseInt(rows[0]?.temp_files || "0", 10),
+      temp_bytes: parseInt(rows[0]?.temp_bytes || "0", 10),
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ============================================
 // VALIDATION
 // ============================================
@@ -561,12 +599,14 @@ async function main(): Promise<void> {
 
   section("TEST: SEPARATE DATABASES");
   console.log("  Running load...");
+  const pgIO_DB_before = await getPostgresIOStatsForDatabases(testDatabases);
   const dbTest = await runWithMonitoring(`postgres://postgres:4321@localhost:5432/${testDatabases[0]}`, () =>
     pMap(testDatabases, (db) => heavyLoadTest_SeparateDB(db, 10000), { concurrency: 20 }),
   );
+  const pgIO_DB_after = await getPostgresIOStatsForDatabases(testDatabases);
   const loadTestDB = dbTest.result;
   const resourcesDB = dbTest.resources;
-  const pgIO_DB = dbTest.postgres_io;
+  const pgIO_DB = { before: pgIO_DB_before, after: pgIO_DB_after };
 
   section("TEST: SCHEMAS");
   console.log("  Running load...");
