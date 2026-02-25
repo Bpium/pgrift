@@ -7,7 +7,10 @@ import { State, FailedEntry } from "./types";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function log(level: "info" | "warn" | "error" | "done" | "fail", msg: string): void {
+function log(
+  level: "info" | "warn" | "error" | "done" | "fail",
+  msg: string,
+): void {
   const prefix: Record<typeof level, string> = {
     info: "[info]",
     warn: "[warn]",
@@ -15,7 +18,8 @@ function log(level: "info" | "warn" | "error" | "done" | "fail", msg: string): v
     done: "[done]",
     fail: "[fail]",
   };
-  const out = level === "error" || level === "fail" ? process.stderr : process.stdout;
+  const out =
+    level === "error" || level === "fail" ? process.stderr : process.stdout;
   out.write(`${prefix[level]} ${msg}\n`);
 }
 
@@ -58,7 +62,10 @@ function exec(cmd: string, password: string): void {
 
 // ─── database helpers ────────────────────────────────────────────────────────
 
-async function withClient<T>(config: object, fn: (client: Client) => Promise<T>): Promise<T> {
+async function withClient<T>(
+  config: object,
+  fn: (client: Client) => Promise<T>,
+): Promise<T> {
   const client = new Client(config);
   await client.connect();
   try {
@@ -69,31 +76,42 @@ async function withClient<T>(config: object, fn: (client: Client) => Promise<T>)
 }
 
 async function ensureTargetDatabase(): Promise<void> {
-  await withClient({ ...CONFIG.target, database: "postgres" }, async (client) => {
-    const { rows } = await client.query("SELECT 1 FROM pg_database WHERE datname = $1", [CONFIG.target.database]);
-    if (rows.length === 0) {
-      await client.query(`CREATE DATABASE "${CONFIG.target.database}"`);
-      log("info", `created database: ${CONFIG.target.database}`);
-    }
-  });
+  await withClient(
+    { ...CONFIG.target, database: "postgres" },
+    async (client) => {
+      const { rows } = await client.query(
+        "SELECT 1 FROM pg_database WHERE datname = $1",
+        [CONFIG.target.database],
+      );
+      if (rows.length === 0) {
+        await client.query(`CREATE DATABASE "${CONFIG.target.database}"`);
+        log("info", `created database: ${CONFIG.target.database}`);
+      }
+    },
+  );
 }
 
 async function getTenants(): Promise<string[]> {
-  return withClient({ ...CONFIG.source, database: "postgres" }, async (client) => {
-    const placeholders = CONFIG.excludeDatabases.map((_, i) => `$${i + 1}`).join(", ");
-    const { rows } = await client.query<{ datname: string }>(
-      `SELECT datname FROM pg_database
+  return withClient(
+    { ...CONFIG.source, database: "postgres" },
+    async (client) => {
+      const placeholders = CONFIG.excludeDatabases
+        .map((_, i) => `$${i + 1}`)
+        .join(", ");
+      const { rows } = await client.query<{ datname: string }>(
+        `SELECT datname FROM pg_database
        WHERE datname NOT IN (${placeholders})
          AND datname NOT LIKE 'pg_%'
        ORDER BY datname`,
-      CONFIG.excludeDatabases,
-    );
-    let tenants = rows.map((r) => r.datname);
-    if (CONFIG.filterPrefix) {
-      tenants = tenants.filter((db) => db.startsWith(CONFIG.filterPrefix!));
-    }
-    return tenants;
-  });
+        CONFIG.excludeDatabases,
+      );
+      let tenants = rows.map((r) => r.datname);
+      if (CONFIG.filterPrefix) {
+        tenants = tenants.filter((db) => db.startsWith(CONFIG.filterPrefix!));
+      }
+      return tenants;
+    },
+  );
 }
 
 // ─── disk space guard ────────────────────────────────────────────────────────
@@ -106,12 +124,16 @@ function getFreeBytesOnDir(dir: string): number {
   return available * 1024;
 }
 
-function assertDiskSpace(dir: string, minBytes = 512 * 1024 * 1024 /* 512 MB */): void {
+function assertDiskSpace(
+  dir: string,
+  minBytes = 512 * 1024 * 1024 /* 512 MB */,
+): void {
   const free = getFreeBytesOnDir(dir);
   if (free < minBytes) {
     throw new Error(
-      `Not enough disk space in ${dir}: ${Math.round(free / 1024 / 1024)} MB free, ` +
-        `need at least ${Math.round(minBytes / 1024 / 1024)} MB`,
+      `Not enough disk space in ${dir}: ${Math.round(
+        free / 1024 / 1024,
+      )} MB free, ` + `need at least ${Math.round(minBytes / 1024 / 1024)} MB`,
     );
   }
 }
@@ -163,17 +185,22 @@ async function migrateTenant(dbName: string): Promise<void> {
     log("info", `  [${dbName}] installing extensions...`);
     await withClient({ ...tgt, database: tempDbName }, async (client) => {
       // Получаем список extensions из исходной БД
-      const extensions = await withClient({ ...src, database: dbName }, async (srcClient) => {
-        const { rows } = await srcClient.query<{ extname: string }>(
-          `SELECT extname FROM pg_extension WHERE extname != 'plpgsql' ORDER BY extname`,
-        );
-        return rows.map((r) => r.extname);
-      });
+      const extensions = await withClient(
+        { ...src, database: dbName },
+        async (srcClient) => {
+          const { rows } = await srcClient.query<{ extname: string }>(
+            `SELECT extname FROM pg_extension WHERE extname != 'plpgsql' ORDER BY extname`,
+          );
+          return rows.map((r) => r.extname);
+        },
+      );
 
       // Устанавливаем каждое расширение в public схему
       for (const extname of extensions) {
         try {
-          await client.query(`CREATE EXTENSION IF NOT EXISTS "${extname}" WITH SCHEMA public`);
+          await client.query(
+            `CREATE EXTENSION IF NOT EXISTS "${extname}" WITH SCHEMA public`,
+          );
           log("info", `  [${dbName}] installed extension: ${extname}`);
         } catch (err) {
           log("warn", `  [${dbName}] failed to install ${extname}: ${err}`);
@@ -251,21 +278,34 @@ async function migrateTenant(dbName: string): Promise<void> {
       await client.query(`DROP SCHEMA IF EXISTS "${dbName}" CASCADE`);
 
       // Устанавливаем extensions в public схему целевой БД
-      const extensions = await withClient({ ...src, database: dbName }, async (srcClient) => {
-        const { rows } = await srcClient.query<{ extname: string }>(
-          `SELECT extname FROM pg_extension WHERE extname != 'plpgsql' ORDER BY extname`,
-        );
-        return rows.map((r) => r.extname);
-      });
+      const extensions = await withClient(
+        { ...src, database: dbName },
+        async (srcClient) => {
+          const { rows } = await srcClient.query<{ extname: string }>(
+            `SELECT extname FROM pg_extension WHERE extname != 'plpgsql' ORDER BY extname`,
+          );
+          return rows.map((r) => r.extname);
+        },
+      );
 
       for (const extname of extensions) {
         try {
-          await client.query(`CREATE EXTENSION IF NOT EXISTS "${extname}" WITH SCHEMA public`);
+          await client.query(
+            `CREATE EXTENSION IF NOT EXISTS "${extname}" WITH SCHEMA public`,
+          );
         } catch (err) {
           // Игнорируем ошибки - extension может быть уже установлено
         }
       }
     });
+
+    let dumpSql = fs.readFileSync(finalDumpFile, "utf-8");
+    const opclassSchema = `${dbName}.gin_trgm_ops`;
+
+    if (dumpSql.includes(opclassSchema)) {
+      dumpSql = dumpSql.split(opclassSchema).join("public.gin_trgm_ops");
+    }
+    fs.writeFileSync(finalDumpFile, dumpSql, "utf-8");
 
     // Восстанавливаем
     exec(
@@ -305,9 +345,16 @@ async function migrateTenant(dbName: string): Promise<void> {
 
 // ─── verification ────────────────────────────────────────────────────────────
 
-async function tableChecksum(client: Client, schema: string, table: string): Promise<string> {
-  const { rows: cols } = await client.query<{ column_name: string }>(
-    `SELECT column_name
+async function tableChecksum(
+  client: Client,
+  schema: string,
+  table: string,
+): Promise<string> {
+  const { rows: cols } = await client.query<{
+    column_name: string;
+    data_type: string;
+  }>(
+    `SELECT column_name, data_type
      FROM information_schema.columns
      WHERE table_schema = $1 AND table_name = $2
      ORDER BY ordinal_position`,
@@ -316,13 +363,23 @@ async function tableChecksum(client: Client, schema: string, table: string): Pro
 
   if (cols.length === 0) return "empty";
 
-  const orderBy = cols.map((c) => `"${c.column_name}" NULLS FIRST`).join(", ");
+  const orderBy = cols
+    .map((c) => {
+      const colExpr =
+        c.data_type === "json" || c.data_type === "jsonb"
+          ? `"${c.column_name}"::text`
+          : `"${c.column_name}"`;
+      return `${colExpr} NULLS FIRST`;
+    })
+    .join(", ");
 
   const { rows } = await client.query<{ checksum: string }>(
     `SELECT md5(string_agg(row_md5, ',' ORDER BY rn)) AS checksum
      FROM (
        SELECT ROW_NUMBER() OVER (ORDER BY ${orderBy}) AS rn,
-              md5(ROW(${cols.map((c) => `"${c.column_name}"`).join(", ")})::text) AS row_md5
+              md5(ROW(${cols
+                .map((c) => `"${c.column_name}"`)
+                .join(", ")})::text) AS row_md5
        FROM ${schema === "public" ? "public" : `"${schema}"`}."${table}"
      ) sub`,
   );
@@ -330,68 +387,88 @@ async function tableChecksum(client: Client, schema: string, table: string): Pro
   return rows[0]?.checksum ?? "null";
 }
 
-async function verifyMigration(dbName: string): Promise<{ ok: boolean; reasons: string[] }> {
+async function verifyMigration(
+  dbName: string,
+): Promise<{ ok: boolean; reasons: string[] }> {
   const reasons: string[] = [];
 
-  await withClient({ ...CONFIG.source, database: dbName }, async (srcClient) => {
-    await withClient(CONFIG.target, async (tgtClient) => {
-      const { rows: srcTables } = await srcClient.query<{ table_name: string }>(
-        `SELECT table_name FROM information_schema.tables
+  await withClient(
+    { ...CONFIG.source, database: dbName },
+    async (srcClient) => {
+      await withClient(CONFIG.target, async (tgtClient) => {
+        const { rows: srcTables } = await srcClient.query<{
+          table_name: string;
+        }>(
+          `SELECT table_name FROM information_schema.tables
          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
          ORDER BY table_name`,
-      );
-      const { rows: tgtTables } = await tgtClient.query<{ table_name: string }>(
-        `SELECT table_name FROM information_schema.tables
+        );
+        const { rows: tgtTables } = await tgtClient.query<{
+          table_name: string;
+        }>(
+          `SELECT table_name FROM information_schema.tables
          WHERE table_schema = $1 AND table_type = 'BASE TABLE'
          ORDER BY table_name`,
-        [dbName],
-      );
-
-      const srcTableNames = srcTables.map((r) => r.table_name);
-      const tgtTableNames = new Set(tgtTables.map((r) => r.table_name));
-
-      const missingTables = srcTableNames.filter((t) => !tgtTableNames.has(t));
-      if (missingTables.length > 0) {
-        reasons.push(`missing tables: ${missingTables.join(", ")}`);
-      }
-
-      for (const table of srcTableNames) {
-        if (!tgtTableNames.has(table)) continue;
-
-        const { rows: srcCnt } = await srcClient.query<{ cnt: string }>(
-          `SELECT COUNT(*)::text AS cnt FROM public."${table}"`,
-        );
-        const { rows: tgtCnt } = await tgtClient.query<{ cnt: string }>(
-          `SELECT COUNT(*)::text AS cnt FROM "${dbName}"."${table}"`,
+          [dbName],
         );
 
-        const srcCount = srcCnt[0].cnt;
-        const tgtCount = tgtCnt[0].cnt;
+        const srcTableNames = srcTables.map((r) => r.table_name);
+        const tgtTableNames = new Set(tgtTables.map((r) => r.table_name));
 
-        if (srcCount !== tgtCount) {
-          reasons.push(`${table}: row count mismatch (src: ${srcCount}, tgt: ${tgtCount})`);
-          continue;
+        const missingTables = srcTableNames.filter(
+          (t) => !tgtTableNames.has(t),
+        );
+        if (missingTables.length > 0) {
+          reasons.push(`missing tables: ${missingTables.join(", ")}`);
         }
 
-        const rowCount = parseInt(srcCount, 10);
-        const skipAbove = (CONFIG as any).skipChecksumAboveRows as number | undefined;
+        for (const table of srcTableNames) {
+          if (!tgtTableNames.has(table)) continue;
 
-        if (skipAbove !== undefined && rowCount > skipAbove) {
-          log("warn", `  ${table}: checksum skipped (${rowCount} rows > threshold ${skipAbove})`);
-          continue;
+          const { rows: srcCnt } = await srcClient.query<{ cnt: string }>(
+            `SELECT COUNT(*)::text AS cnt FROM public."${table}"`,
+          );
+          const { rows: tgtCnt } = await tgtClient.query<{ cnt: string }>(
+            `SELECT COUNT(*)::text AS cnt FROM "${dbName}"."${table}"`,
+          );
+
+          const srcCount = srcCnt[0].cnt;
+          const tgtCount = tgtCnt[0].cnt;
+
+          if (srcCount !== tgtCount) {
+            reasons.push(
+              `${table}: row count mismatch (src: ${srcCount}, tgt: ${tgtCount})`,
+            );
+            continue;
+          }
+
+          const rowCount = parseInt(srcCount, 10);
+          const skipAbove = (CONFIG as any).skipChecksumAboveRows as
+            | number
+            | undefined;
+
+          if (skipAbove !== undefined && rowCount > skipAbove) {
+            log(
+              "warn",
+              `  ${table}: checksum skipped (${rowCount} rows > threshold ${skipAbove})`,
+            );
+            continue;
+          }
+
+          const [srcChecksum, tgtChecksum] = await Promise.all([
+            tableChecksum(srcClient, "public", table),
+            tableChecksum(tgtClient, dbName, table),
+          ]);
+
+          if (srcChecksum !== tgtChecksum) {
+            reasons.push(
+              `${table}: checksum mismatch (src: ${srcChecksum}, tgt: ${tgtChecksum})`,
+            );
+          }
         }
-
-        const [srcChecksum, tgtChecksum] = await Promise.all([
-          tableChecksum(srcClient, "public", table),
-          tableChecksum(tgtClient, dbName, table),
-        ]);
-
-        if (srcChecksum !== tgtChecksum) {
-          reasons.push(`${table}: checksum mismatch (src: ${srcChecksum}, tgt: ${tgtChecksum})`);
-        }
-      }
-    });
-  });
+      });
+    },
+  );
 
   return { ok: reasons.length === 0, reasons };
 }
@@ -420,7 +497,10 @@ async function runBatch(tenants: string[], state: State): Promise<void> {
       state.completed.push(db);
       log("done", `${db} (${state.completed.length} total)`);
     } else {
-      const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      const message =
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
 
       const existing = state.failed.find((f: FailedEntry) => f.db === db);
       if (existing) {
@@ -470,9 +550,17 @@ async function main(): Promise<void> {
     const migratedSoFar = state.completed.length - initialDone;
     const pct = Math.round((state.completed.length / allTenants.length) * 100);
     const remainingCount = remaining.length - migratedSoFar;
-    const eta = migratedSoFar > 0 ? Math.round((elapsed / migratedSoFar) * remainingCount) : "?";
+    const eta =
+      migratedSoFar > 0
+        ? Math.round((elapsed / migratedSoFar) * remainingCount)
+        : "?";
 
-    log("info", `batch ${i + 1}/${batches.length} | ${pct}% | ${elapsed}s elapsed | ETA ~${eta}s`);
+    log(
+      "info",
+      `batch ${i + 1}/${
+        batches.length
+      } | ${pct}% | ${elapsed}s elapsed | ETA ~${eta}s`,
+    );
 
     await runBatch(batches[i], state);
     saveState(state);
@@ -480,22 +568,39 @@ async function main(): Promise<void> {
 
   const totalTime = Math.round((Date.now() - startTime) / 1000);
 
-  log("info", `completed: ${state.completed.length} | failed: ${state.failed.length} | time: ${totalTime}s`);
+  log(
+    "info",
+    `completed: ${state.completed.length} | failed: ${state.failed.length} | time: ${totalTime}s`,
+  );
 
   if (state.failed.length > 0) {
     log("warn", "failed tenants:");
     state.failed.forEach((f: FailedEntry) =>
-      log("fail", `  ${f.db} (${f.attempts} attempts): ${f.error.slice(0, 200)}`),
+      log(
+        "fail",
+        `  ${f.db} (${f.attempts} attempts): ${f.error.slice(0, 200)}`,
+      ),
     );
   }
 
   atomicWrite(
     "./migration-report.json",
-    JSON.stringify({ ...state, totalDatabases: allTenants.length, totalTimeSeconds: totalTime }, null, 2),
+    JSON.stringify(
+      {
+        ...state,
+        totalDatabases: allTenants.length,
+        totalTimeSeconds: totalTime,
+      },
+      null,
+      2,
+    ),
   );
 }
 
 main().catch((err: unknown) => {
-  log("error", `fatal: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+  log(
+    "error",
+    `fatal: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
+  );
   process.exit(1);
 });
