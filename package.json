@@ -12,7 +12,8 @@
     "verify": "npx tsx verify.ts",
     "create-db": "npx tsx scripts/createRandomDb.test.ts",
     "many-bases": "npx tsx scripts/manyBases.test.ts",
-    "many-schemas": "npx tsx scripts/manySchemas.test.ts"
+    "many-schemas": "npx tsx scripts/manySchemas.test.ts",
+    "comparison": "npx tsx scripts/comparison.test.ts"
   },
   "dependencies": {
     "dotenv": "^17.3.1",
