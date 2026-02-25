@@ -2,6 +2,7 @@ import { Client } from "pg";
 import pMap from "p-map";
 import fs from "fs";
 import os from "os";
+import { execSync } from "child_process";
 
 const tenants: string[] = JSON.parse(fs.readFileSync("./scripts/db-list.json", "utf8"));
 
@@ -16,6 +17,20 @@ interface SystemStats {
   memory_used_gb: string;
   memory_free_gb: string;
   memory_usage_pct: string;
+}
+
+interface HardwareInfo {
+  platform: string;
+  arch: string;
+  hostname: string;
+  node_version: string;
+  cpu_cores: number;
+  cpu_model: string;
+  memory_total_gb: number;
+  memory_free_gb: number;
+  load_avg_1m: number;
+  load_avg_5m: number;
+  load_avg_15m: number;
 }
 
 interface PostgresStats {
@@ -39,13 +54,165 @@ interface LoadTestResult {
   error?: string;
 }
 
-interface ConnectionPoolResult {
-  type: "separate_db" | "schema";
-  total_connections: number;
-  duration_ms: number;
-  queries_per_sec: string;
-  system_before: SystemStats;
-  system_after: SystemStats;
+interface ResourceSnapshot {
+  timestamp: number;
+  cpu_usage_pct: number;
+  memory_used_gb: number;
+  memory_usage_pct: number;
+  load_average: number[];
+  postgres_connections?: number;
+  postgres_active_queries?: number;
+}
+
+interface ResourceMonitoring {
+  snapshots: ResourceSnapshot[];
+  duration_sec: number;
+  avg_cpu: number;
+  max_cpu: number;
+  avg_memory_pct: number;
+  max_memory_pct: number;
+  avg_load_1m: number;
+  max_load_1m: number;
+  max_connections: number;
+  max_active_queries: number;
+}
+
+interface PostgresIOStats {
+  shared_buffers_hit_pct: number;
+  disk_blocks_read: number;
+  disk_blocks_hit: number;
+  temp_files: number;
+  temp_bytes: number;
+}
+
+class ResourceMonitor {
+  private snapshots: ResourceSnapshot[] = [];
+  private intervalId?: NodeJS.Timeout;
+  private connectionString: string;
+
+  constructor(connectionString: string) {
+    this.connectionString = connectionString;
+  }
+
+  async captureSnapshot(): Promise<ResourceSnapshot> {
+    const cpus = os.cpus();
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+
+    const cpuUsage =
+      cpus.reduce((acc, cpu) => {
+        const total = Object.values(cpu.times).reduce((a, b) => a + b, 0);
+        const idle = cpu.times.idle;
+        return acc + ((total - idle) / total) * 100;
+      }, 0) / cpus.length;
+
+    const snapshot: ResourceSnapshot = {
+      timestamp: Date.now(),
+      cpu_usage_pct: parseFloat(cpuUsage.toFixed(2)),
+      memory_used_gb: parseFloat((usedMem / 1024 / 1024 / 1024).toFixed(2)),
+      memory_usage_pct: parseFloat(((usedMem / totalMem) * 100).toFixed(2)),
+      load_average: os.loadavg(),
+    };
+
+    try {
+      const client = new Client({ connectionString: this.connectionString });
+      await client.connect();
+
+      const { rows } = await client.query(`
+        SELECT 
+          (SELECT count(*) FROM pg_stat_activity) as total_connections,
+          (SELECT count(*) FROM pg_stat_activity WHERE state = 'active') as active_queries
+      `);
+
+      snapshot.postgres_connections = parseInt(rows[0].total_connections);
+      snapshot.postgres_active_queries = parseInt(rows[0].active_queries);
+
+      await client.end();
+    } catch {}
+
+    return snapshot;
+  }
+
+  start(intervalMs: number = 1000): void {
+    this.intervalId = setInterval(async () => {
+      const snapshot = await this.captureSnapshot();
+      this.snapshots.push(snapshot);
+    }, intervalMs);
+  }
+
+  stop(): ResourceMonitoring {
+    if (this.intervalId) clearInterval(this.intervalId);
+
+    const duration =
+      this.snapshots.length > 0
+        ? (this.snapshots[this.snapshots.length - 1].timestamp - this.snapshots[0].timestamp) / 1000
+        : 0;
+
+    const avgCpu = this.snapshots.reduce((sum, s) => sum + s.cpu_usage_pct, 0) / this.snapshots.length;
+
+    const maxCpu = Math.max(...this.snapshots.map((s) => s.cpu_usage_pct));
+
+    const avgMemPct = this.snapshots.reduce((sum, s) => sum + s.memory_usage_pct, 0) / this.snapshots.length;
+
+    const maxMemPct = Math.max(...this.snapshots.map((s) => s.memory_usage_pct));
+
+    const load1 = this.snapshots.map((s) => s.load_average[0] ?? 0);
+    const avgLoad1 = load1.length ? load1.reduce((a, b) => a + b, 0) / load1.length : 0;
+    const maxLoad1 = load1.length ? Math.max(...load1) : 0;
+
+    const maxConn = Math.max(
+      ...this.snapshots.map((s) => s.postgres_connections ?? 0),
+      0,
+    );
+    const maxActive = Math.max(
+      ...this.snapshots.map((s) => s.postgres_active_queries ?? 0),
+      0,
+    );
+
+    return {
+      snapshots: this.snapshots,
+      duration_sec: duration,
+      avg_cpu: parseFloat(avgCpu.toFixed(2)),
+      max_cpu: parseFloat(maxCpu.toFixed(2)),
+      avg_memory_pct: parseFloat(avgMemPct.toFixed(2)),
+      max_memory_pct: parseFloat(maxMemPct.toFixed(2)),
+      avg_load_1m: parseFloat(avgLoad1.toFixed(2)),
+      max_load_1m: parseFloat(maxLoad1.toFixed(2)),
+      max_connections: maxConn,
+      max_active_queries: maxActive,
+    };
+  }
+}
+
+async function getPostgresIOStats(connectionString: string): Promise<PostgresIOStats | null> {
+  try {
+    const client = new Client({ connectionString });
+    await client.connect();
+
+    const { rows } = await client.query(`
+      SELECT 
+        ROUND(100.0 * sum(blks_hit) / NULLIF(sum(blks_hit) + sum(blks_read), 0), 2) as hit_pct,
+        sum(blks_read) as disk_reads,
+        sum(blks_hit) as cache_hits,
+        sum(temp_files) as temp_files,
+        sum(temp_bytes) as temp_bytes
+      FROM pg_stat_database
+      WHERE datname = current_database()
+    `);
+
+    await client.end();
+
+    return {
+      shared_buffers_hit_pct: parseFloat(rows[0].hit_pct || "0"),
+      disk_blocks_read: parseInt(rows[0].disk_reads || "0"),
+      disk_blocks_hit: parseInt(rows[0].cache_hits || "0"),
+      temp_files: parseInt(rows[0].temp_files || "0"),
+      temp_bytes: parseInt(rows[0].temp_bytes || "0"),
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ============================================
@@ -69,7 +236,7 @@ async function getExistingSchemas(): Promise<Set<string>> {
 
     return new Set(rows.map((r) => r.schema_name));
   } catch (err) {
-    console.error("⚠️  Failed to get existing schemas:", err);
+    console.error("Failed to get existing schemas:", err);
     return new Set();
   }
 }
@@ -92,9 +259,34 @@ async function getExistingDatabases(): Promise<Set<string>> {
 
     return new Set(rows.map((r) => r.datname));
   } catch (err) {
-    console.error("⚠️  Failed to get existing databases:", err);
+    console.error("Failed to get existing databases:", err);
     return new Set();
   }
+}
+
+// ============================================
+// HARDWARE INFO
+// ============================================
+
+function getHardwareInfo(): HardwareInfo {
+  const load = os.loadavg();
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const cpus = os.cpus();
+  const model = cpus[0]?.model ?? "unknown";
+  return {
+    platform: os.platform(),
+    arch: os.arch(),
+    hostname: os.hostname(),
+    node_version: process.version,
+    cpu_cores: cpus.length,
+    cpu_model: model,
+    memory_total_gb: parseFloat((totalMem / 1024 / 1024 / 1024).toFixed(2)),
+    memory_free_gb: parseFloat((freeMem / 1024 / 1024 / 1024).toFixed(2)),
+    load_avg_1m: load[0],
+    load_avg_5m: load[1],
+    load_avg_15m: load[2],
+  };
 }
 
 // ============================================
@@ -150,6 +342,58 @@ async function getPostgresStats(connectionString: string): Promise<PostgresStats
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// ============================================
+// COMPACT LOG FORMATTERS
+// ============================================
+
+const LINE = "─";
+const W = 58;
+
+function section(title: string): void {
+  console.log(`\n${LINE.repeat(2)} ${title} ${LINE.repeat(Math.max(0, W - title.length - 4))}`);
+}
+
+function line(key: string, value: string | number): void {
+  console.log(`  ${key.padEnd(22)} ${value}`);
+}
+
+function printHardwareInfo(hw: HardwareInfo): void {
+  section("HARDWARE");
+  line("Platform", `${hw.platform} / ${hw.arch}`);
+  line("Host", hw.hostname);
+  line("Node", hw.node_version);
+  line("CPU", `${hw.cpu_cores} cores, ${hw.cpu_model}`);
+  line("Memory", `${hw.memory_total_gb} GB total, ${hw.memory_free_gb} GB free`);
+  line("Load average", `${hw.load_avg_1m.toFixed(2)} / ${hw.load_avg_5m.toFixed(2)} / ${hw.load_avg_15m.toFixed(2)} (1/5/15 min)`);
+}
+
+function printBaselineCompact(stats: SystemStats): void {
+  section("BASELINE (before tests)");
+  line("CPU", `${stats.cpu_count} cores, usage: ${stats.cpu_usage.slice(0, 4).join("% ")}% ...`);
+  line("Memory", `${stats.memory_used_gb}/${stats.memory_total_gb} GB (${stats.memory_usage_pct}%)`);
+}
+
+function printResourceBlock(label: string, r: ResourceMonitoring, pgIO: { before?: PostgresIOStats | null; after?: PostgresIOStats | null }): void {
+  console.log(`\n  [ ${label} ]`);
+  line("CPU (avg/max)", `${r.avg_cpu}% / ${r.max_cpu}%`);
+  line("Memory (avg/max)", `${r.avg_memory_pct}% / ${r.max_memory_pct}%`);
+  line("Load 1m (avg/max)", `${r.avg_load_1m} / ${r.max_load_1m}`);
+  line("PG connections (max)", r.max_connections);
+  line("PG active queries (max)", r.max_active_queries);
+  if (pgIO.after) {
+    const diskDelta = pgIO.before ? pgIO.after.disk_blocks_read - pgIO.before.disk_blocks_read : pgIO.after.disk_blocks_read;
+    line("Cache hit", `${pgIO.after.shared_buffers_hit_pct}%`);
+    line("Disk reads (delta)", diskDelta);
+  }
+}
+
+function printQueryPerf(label: string, totalQueries: number, avgLatency: number, successCount: number): void {
+  console.log(`\n  [ ${label} ]`);
+  line("Total queries", totalQueries);
+  line("Successful workers", successCount);
+  line("Avg latency", `${avgLatency.toFixed(2)} ms`);
 }
 
 // ============================================
@@ -287,265 +531,113 @@ async function heavyLoadTest_Schema(schemaName: string, duration: number = 10000
 }
 
 // ============================================
-// CONNECTION POOL TEST
-// ============================================
-
-async function connectionPoolTest_SeparateDB(
-  dbNames: string[],
-  concurrency: number = 50,
-): Promise<ConnectionPoolResult> {
-  console.log(`\n🔗 Connection Pool Test (Separate DBs, ${concurrency} concurrent)...`);
-
-  const systemBefore = getSystemStats();
-  const startTime = Date.now();
-
-  await pMap(
-    dbNames,
-    async (db) => {
-      const client = new Client({
-        connectionString: `postgres://postgres:4321@localhost:5432/${db}`,
-      });
-      await client.connect();
-      await client.query(`SELECT COUNT(*) FROM users_data`);
-      await client.end();
-      return { db, success: true };
-    },
-    { concurrency },
-  );
-
-  const duration = Date.now() - startTime;
-  const systemAfter = getSystemStats();
-
-  return {
-    type: "separate_db",
-    total_connections: dbNames.length,
-    duration_ms: duration,
-    queries_per_sec: (dbNames.length / (duration / 1000)).toFixed(2),
-    system_before: systemBefore,
-    system_after: systemAfter,
-  };
-}
-
-async function connectionPoolTest_Schema(
-  schemaNames: string[],
-  concurrency: number = 50,
-): Promise<ConnectionPoolResult> {
-  console.log(`\n🔗 Connection Pool Test (Schemas, ${concurrency} concurrent)...`);
-
-  const systemBefore = getSystemStats();
-  const startTime = Date.now();
-
-  await pMap(
-    schemaNames,
-    async (schema) => {
-      const client = new Client({
-        connectionString: `postgres://postgres:4321@localhost:5432/tenants`,
-      });
-      await client.connect();
-      await client.query(`SELECT COUNT(*) FROM "${schema}".users_data`);
-      await client.end();
-      return { schema, success: true };
-    },
-    { concurrency },
-  );
-
-  const duration = Date.now() - startTime;
-  const systemAfter = getSystemStats();
-
-  return {
-    type: "schema",
-    total_connections: schemaNames.length,
-    duration_ms: duration,
-    queries_per_sec: (schemaNames.length / (duration / 1000)).toFixed(2),
-    system_before: systemBefore,
-    system_after: systemAfter,
-  };
-}
-
-// ============================================
 // MAIN
 // ============================================
 
 async function main(): Promise<void> {
-  console.log("=".repeat(60));
-  console.log("🔥 HEAVY LOAD PERFORMANCE TEST");
-  console.log("   Simulating production workload: 300 QPS, mixed queries");
-  console.log("=".repeat(60));
+  const width = 60;
+  console.log("\n" + "═".repeat(width));
+  console.log("  HEAVY LOAD: Separate DBs vs Schemas + hardware monitoring");
+  console.log("═".repeat(width));
 
-  // Проверяем что существует
-  console.log("\n🔍 Validating databases and schemas...");
   const existingDatabases = await getExistingDatabases();
   const existingSchemas = await getExistingSchemas();
-
   const validDatabases = tenants.filter((db) => existingDatabases.has(db));
   const validSchemas = tenants.filter((schema) => existingSchemas.has(schema));
 
-  const missingDatabases = tenants.filter((db) => !existingDatabases.has(db));
-  const missingSchemas = tenants.filter((schema) => !existingSchemas.has(schema));
-
-  console.log(`✅ Valid databases: ${validDatabases.length}/${tenants.length}`);
-  console.log(`✅ Valid schemas: ${validSchemas.length}/${tenants.length}`);
-
-  if (missingDatabases.length > 0) {
-    console.log(`⚠️  Missing databases (${missingDatabases.length}): ${missingDatabases.slice(0, 5).join(", ")}...`);
-  }
-
-  if (missingSchemas.length > 0) {
-    console.log(`⚠️  Missing schemas (${missingSchemas.length}): ${missingSchemas.slice(0, 5).join(", ")}...`);
-  }
-
   if (validDatabases.length === 0 || validSchemas.length === 0) {
-    console.error("\n❌ Not enough valid databases or schemas to test!");
+    console.error("\nNot enough databases or schemas to run the test.");
     process.exit(1);
   }
 
-  const testDatabases = validDatabases.slice(0, 100);
-  const testSchemas = validSchemas.slice(0, 100);
+  const testDatabases = validDatabases.slice(0, 900);
+  const testSchemas = validSchemas.slice(0, 900);
+  console.log(`\nValid: ${validDatabases.length}/${tenants.length} DBs, ${validSchemas.length}/${tenants.length} schemas. Running: ${testDatabases.length} DBs, ${testSchemas.length} schemas.`);
 
-  console.log(`\nTesting ${testDatabases.length} databases and ${testSchemas.length} schemas...`);
-
-  // ===== 1. System baseline =====
-  console.log("\n📊 System Baseline:");
+  const hardware = getHardwareInfo();
+  printHardwareInfo(hardware);
   const baseline = getSystemStats();
-  console.log(JSON.stringify(baseline, null, 2));
+  printBaselineCompact(baseline);
 
-  // ===== 2. Heavy Load Test =====
-  console.log("\n\n🔥 Heavy Load Test (10 seconds per tenant, concurrency=20)...");
-  console.log("Testing Separate DBs...");
-
-  const loadTestDB = await pMap(testDatabases, (db) => heavyLoadTest_SeparateDB(db, 10000), {
-    concurrency: 20,
-  });
-
-  console.log("Testing Schemas...");
-
-  const loadTestSchema = await pMap(testSchemas, (schema) => heavyLoadTest_Schema(schema, 10000), {
-    concurrency: 20,
-  });
-
-  // Анализ результатов
-  const dbSuccess = loadTestDB.filter((r) => !r.error && r.queries_executed > 0);
-  const schemaSuccess = loadTestSchema.filter((r) => !r.error && r.queries_executed > 0);
-
-  console.log("\n📈 Heavy Load Results:");
-  console.log("\nSeparate DBs:");
-  console.log(`  Successful tests:  ${dbSuccess.length}/${loadTestDB.length}`);
-  console.log(`  Total queries:     ${dbSuccess.reduce((sum, r) => sum + r.queries_executed, 0)}`);
-  console.log(
-    `  Avg latency:       ${(dbSuccess.reduce((sum, r) => sum + r.avg_latency, 0) / dbSuccess.length).toFixed(2)}ms`,
+  section("TEST: SEPARATE DATABASES");
+  console.log("  Running load...");
+  const dbTest = await runWithMonitoring(`postgres://postgres:4321@localhost:5432/${testDatabases[0]}`, () =>
+    pMap(testDatabases, (db) => heavyLoadTest_SeparateDB(db, 10000), { concurrency: 20 }),
   );
-  console.log(
-    `  P95 latency:       ${(dbSuccess.reduce((sum, r) => sum + r.p95_latency, 0) / dbSuccess.length).toFixed(2)}ms`,
-  );
-  console.log(
-    `  P99 latency:       ${(dbSuccess.reduce((sum, r) => sum + r.p99_latency, 0) / dbSuccess.length).toFixed(2)}ms`,
-  );
-  console.log(`  Errors:            ${dbSuccess.reduce((sum, r) => sum + r.errors, 0)}`);
+  const loadTestDB = dbTest.result;
+  const resourcesDB = dbTest.resources;
+  const pgIO_DB = dbTest.postgres_io;
 
-  console.log("\nSchemas:");
-  console.log(`  Successful tests:  ${schemaSuccess.length}/${loadTestSchema.length}`);
-  console.log(`  Total queries:     ${schemaSuccess.reduce((sum, r) => sum + r.queries_executed, 0)}`);
-  console.log(
-    `  Avg latency:       ${(schemaSuccess.reduce((sum, r) => sum + r.avg_latency, 0) / schemaSuccess.length).toFixed(2)}ms`,
-  );
-  console.log(
-    `  P95 latency:       ${(schemaSuccess.reduce((sum, r) => sum + r.p95_latency, 0) / schemaSuccess.length).toFixed(2)}ms`,
-  );
-  console.log(
-    `  P99 latency:       ${(schemaSuccess.reduce((sum, r) => sum + r.p99_latency, 0) / schemaSuccess.length).toFixed(2)}ms`,
-  );
-  console.log(`  Errors:            ${schemaSuccess.reduce((sum, r) => sum + r.errors, 0)}`);
-
-  // ===== 3. Connection Pool Test =====
-  const poolTestDB = await connectionPoolTest_SeparateDB(validDatabases.slice(0, 200), 50);
-  const poolTestSchema = await connectionPoolTest_Schema(validSchemas.slice(0, 200), 50);
-
-  console.log("\n🔗 Connection Pool Test Results:");
-  console.log("\nSeparate DBs:");
-  console.log(`  Duration:          ${poolTestDB.duration_ms}ms`);
-  console.log(`  Queries/sec:       ${poolTestDB.queries_per_sec}`);
-  console.log(
-    `  Memory after:      ${poolTestDB.system_after.memory_used_gb}GB (${poolTestDB.system_after.memory_usage_pct}%)`,
+  section("TEST: SCHEMAS");
+  console.log("  Running load...");
+  const schemaTest = await runWithMonitoring(`postgres://postgres:4321@localhost:5432/tenants`, () =>
+    pMap(testSchemas, (schema) => heavyLoadTest_Schema(schema, 10000), { concurrency: 20 }),
   );
 
-  console.log("\nSchemas:");
-  console.log(`  Duration:          ${poolTestSchema.duration_ms}ms`);
-  console.log(`  Queries/sec:       ${poolTestSchema.queries_per_sec}`);
-  console.log(
-    `  Memory after:      ${poolTestSchema.system_after.memory_used_gb}GB (${poolTestSchema.system_after.memory_usage_pct}%)`,
-  );
+  const loadTestSchema = schemaTest.result;
+  const resourcesSchema = schemaTest.resources;
+  const pgIO_Schema = schemaTest.postgres_io;
 
-  // ===== 4. Postgres Stats =====
-  console.log("\n💾 PostgreSQL Statistics:");
+  // ============================================================
+  // ====================== ANALYTICS ===========================
+  // ============================================================
 
-  const dbStats = await getPostgresStats(`postgres://postgres:4321@localhost:5432/${validDatabases[0]}`);
-  const schemaStats = await getPostgresStats(`postgres://postgres:4321@localhost:5432/tenants`);
-
-  console.log("\nSeparate DB sample:");
-  console.log(JSON.stringify(dbStats, null, 2));
-
-  console.log("\nSchemas DB:");
-  console.log(JSON.stringify(schemaStats, null, 2));
-
-  // ===== Save Results =====
-  const allResults = {
-    validation: {
-      total_tenants: tenants.length,
-      valid_databases: validDatabases.length,
-      valid_schemas: validSchemas.length,
-      missing_databases: missingDatabases,
-      missing_schemas: missingSchemas,
-    },
-    system_baseline: baseline,
-    heavy_load: {
-      separate_db: loadTestDB,
-      schema: loadTestSchema,
-    },
-    connection_pool: {
-      separate_db: poolTestDB,
-      schema: poolTestSchema,
-    },
-    postgres_stats: {
-      separate_db: dbStats,
-      schema: schemaStats,
-    },
-  };
-
-  fs.writeFileSync("./heavy-load-results.json", JSON.stringify(allResults, null, 2));
-  console.log("\n✅ Results saved to heavy-load-results.json");
-
-  // ===== Final Verdict =====
-  console.log("\n" + "=".repeat(60));
-  console.log("🏆 VERDICT");
-  console.log("=".repeat(60));
-
-  const dbAvgLatency = dbSuccess.reduce((sum, r) => sum + r.avg_latency, 0) / dbSuccess.length;
-  const schemaAvgLatency = schemaSuccess.reduce((sum, r) => sum + r.avg_latency, 0) / schemaSuccess.length;
-  const latencyImprovement = (((dbAvgLatency - schemaAvgLatency) / dbAvgLatency) * 100).toFixed(1);
-
+  const dbSuccess = loadTestDB.filter((r: LoadTestResult) => !r.error && r.queries_executed > 0);
+  const schemaSuccess = loadTestSchema.filter((r: LoadTestResult) => !r.error && r.queries_executed > 0);
   const dbTotalQueries = dbSuccess.reduce((sum, r) => sum + r.queries_executed, 0);
   const schemaTotalQueries = schemaSuccess.reduce((sum, r) => sum + r.queries_executed, 0);
-  const throughputImprovement = (((schemaTotalQueries - dbTotalQueries) / dbTotalQueries) * 100).toFixed(1);
+  const dbAvgLatency = dbSuccess.length ? dbSuccess.reduce((sum, r) => sum + r.avg_latency, 0) / dbSuccess.length : 0;
+  const schemaAvgLatency = schemaSuccess.length ? schemaSuccess.reduce((sum, r) => sum + r.avg_latency, 0) / schemaSuccess.length : 0;
 
-  const memoryDiff = (
-    parseFloat(poolTestDB.system_after.memory_usage_pct) - parseFloat(poolTestSchema.system_after.memory_usage_pct)
-  ).toFixed(1);
+  section("RESULTS: QUERY PERFORMANCE");
+  printQueryPerf("Separate DBs", dbTotalQueries, dbAvgLatency, dbSuccess.length);
+  printQueryPerf("Schemas", schemaTotalQueries, schemaAvgLatency, schemaSuccess.length);
 
-  console.log(
-    `\nLatency:     Schemas ${latencyImprovement}% ${parseFloat(latencyImprovement) > 0 ? "better" : "worse"}`,
-  );
-  console.log(
-    `Throughput:  Schemas ${throughputImprovement}% ${parseFloat(throughputImprovement) > 0 ? "better" : "worse"}`,
-  );
-  console.log(`Memory:      Schemas use ${memoryDiff}% ${parseFloat(memoryDiff) > 0 ? "less" : "more"}`);
+  section("RESULTS: HARDWARE + POSTGRES LOAD");
+  printResourceBlock("Separate DBs", resourcesDB, pgIO_DB);
+  printResourceBlock("Schemas", resourcesSchema, pgIO_Schema);
 
-  if (parseFloat(latencyImprovement) > 20 && parseFloat(throughputImprovement) > 20) {
-    console.log("\n✅ RECOMMENDATION: Migrate to schemas - significant improvements!");
-  } else if (parseFloat(latencyImprovement) > 10) {
-    console.log("\n⚠️  RECOMMENDATION: Schemas show improvement, but test with real production load");
-  } else {
-    console.log("\n❌ RECOMMENDATION: Schemas don't show significant improvement for your workload");
-  }
+  section("VERDICT (Schemas vs Separate DBs)");
+  const latencyImprovement = dbAvgLatency ? (((dbAvgLatency - schemaAvgLatency) / dbAvgLatency) * 100).toFixed(1) : "0";
+  const throughputImprovement = dbTotalQueries ? (((schemaTotalQueries - dbTotalQueries) / dbTotalQueries) * 100).toFixed(1) : "0";
+  const cpuImprovement = resourcesDB.avg_cpu ? (((resourcesDB.avg_cpu - resourcesSchema.avg_cpu) / resourcesDB.avg_cpu) * 100).toFixed(1) : "0";
+  const memoryImprovement = resourcesDB.avg_memory_pct
+    ? (((resourcesDB.avg_memory_pct - resourcesSchema.avg_memory_pct) / resourcesDB.avg_memory_pct) * 100).toFixed(1)
+    : "0";
+  line("Latency", `Schemas ${latencyImprovement}% ${parseFloat(latencyImprovement) > 0 ? "better" : "worse"}`);
+  line("Throughput", `Schemas ${throughputImprovement}% ${parseFloat(throughputImprovement) > 0 ? "better" : "worse"}`);
+  line("CPU", `Schemas ${cpuImprovement}% ${parseFloat(cpuImprovement) > 0 ? "lower" : "higher"}`);
+  line("Memory", `Schemas ${memoryImprovement}% ${parseFloat(memoryImprovement) > 0 ? "lower" : "higher"}`);
+
+  const allResults = {
+    hardware,
+    baseline,
+    separate_databases: dbTest,
+    schemas: schemaTest,
+  };
+  fs.writeFileSync("./heavy-load-results.json", JSON.stringify(allResults, null, 2));
+  console.log("\nResults saved to heavy-load-results.json\n");
+}
+
+async function runWithMonitoring(connectionString: string, loadFn: () => Promise<any>) {
+  const monitor = new ResourceMonitor(connectionString);
+  monitor.start(1000);
+
+  const pgIOBefore = await getPostgresIOStats(connectionString);
+
+  const result = await loadFn();
+
+  const resources = monitor.stop();
+  const pgIOAfter = await getPostgresIOStats(connectionString);
+
+  return {
+    result,
+    resources,
+    postgres_io: {
+      before: pgIOBefore,
+      after: pgIOAfter,
+    },
+  };
 }
 
 main().catch((err) => {
