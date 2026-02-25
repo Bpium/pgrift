@@ -10,8 +10,9 @@
     "dev": "npx tsx migrate.ts",
     "cleanup": "npx tsx cleanup.ts",
     "verify": "npx tsx verify.ts",
-    "create-db": "npx tsx scripts/createRandomDb.ts",
-    "heavy": "npx tsx scripts/heavy.ts"
+    "create-db": "npx tsx scripts/createRandomDb.test.ts",
+    "many-bases": "npx tsx scripts/manyBases.test.ts",
+    "many-schemas": "npx tsx scripts/manySchemas.test.ts"
   },
   "dependencies": {
     "dotenv": "^17.3.1",

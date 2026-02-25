@@ -5003,5 +5003,7 @@
     }
   ],
   "startedAt": "2026-02-24T14:56:43.233Z",
-  "lastUpdated": "2026-02-24T19:37:16.470Z"
+  "lastUpdated": "2026-02-24T19:37:16.470Z",
+  "totalDatabases": 1000,
+  "totalTimeSeconds": 16833
 }
