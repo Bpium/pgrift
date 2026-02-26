@@ -1,59 +1,56 @@
-# pg-tenant-migrator
+# pgrift
 
-**pg-tenant-migrator** is a utility to consolidate multiple PostgreSQL databases (each representing a tenant) into a single target database, placing each tenant’s tables in a dedicated schema.
+Moves many PostgreSQL databases (one per tenant) into a single DB: each tenant becomes a schema. Uses in-place rename on source (`public` → tenant name), `pg_dump`, then `psql` into the target. State is saved so you can resume after a crash.
 
----
+**Requires:** Node 18+, `pg_dump` and `psql` in PATH.
 
-## Features
-
-- **Automatic Discovery:** Finds all tenant databases on the source server (optionally filtered by name prefix).
-- **Dump and Restore:** For each tenant, exports the database with `pg_dump`, creates a matching schema in the target database, and restores the dump into that schema using `pg_restore`.
-- **Batch Processing:** Migrates multiple tenants in parallel, configurable by the concurrency setting.
-- **Progress Tracking & Resume:** Persists status to `migration-state.json` and can resume seamlessly after interruptions.
-- **Migration Report:** Outputs a detailed `migration-report.json` with migration statistics.
-
----
-
-## Requirements
-
-- **Node.js** v18 or higher
-- `pg_dump` and `pg_restore` must be available in your system `PATH`
-- Source databases must be network-accessible from the machine running this script
-
----
-
-## Configuration
-
-Edit the `CONFIG` object at the top of `migrate.ts`:
-
-
-| Key                | Description                                                                    |
-| ------------------ | ------------------------------------------------------------------------------ |
-| `source`           | Connection details for the source PostgreSQL server                            |
-| `target`           | Connection details and target database name                                    |
-| `dumpDir`          | Temporary directory for dump files (removed after each tenant migration)       |
-| `stateFile`        | Path to the JSON file tracking migration state                                 |
-| `concurrency`      | Number of tenants to process in parallel                                       |
-| `excludeDatabases` | List of databases to skip (system DBs, the target itself, etc.)                |
-| `filterPrefix`     | Only migrate databases whose name begins with this string (set `null` for all) |
-
-
----
-
-## Usage
+## Setup
 
 ```bash
+cp .env.example .env
+# edit .env: SOURCE_URL, TARGET_URL (and optionally DUMP_DIR, STATE_FILE, CONCURRENCY, FILTER_PREFIX)
 npm install
-npx ts-node migrate.ts
 ```
 
-If the process is interrupted, simply re-run the command—previously completed tenants will be skipped automatically.
+Config is read from env (see `.env.example`). Main options: `SOURCE_URL`, `TARGET_URL`, `TARGET_DATABASE` (default `tenants`), `DUMP_DIR`, `STATE_FILE`, `CONCURRENCY`, `FILTER_PREFIX` (e.g. `bench_db_` to only migrate those DBs).
 
----
+## Commands
+
+| Command | What it does |
+|--------|----------------|
+| `npm run dev` | Run migration (or `just migrate`) |
+| `npm run verify` | Compare source DBs vs target schemas: table list, row counts, optional checksums |
+| `npm run cleanup` | Remove all tenant schemas from target, state file, dump dir contents, and `migration-report.json`. Asks for `DELETE ALL` before dropping schemas |
+| `npm run lint` | Run Biome linter (`just lint`) |
+| `npm run lint:fix` | Lint and apply safe fixes |
+| `npm run format` | Format code with Biome |
+
+After an interrupt, run `npm run dev` again; completed tenants are skipped.
+
+## What the migration does per tenant
+
+1. Terminate connections to the source DB.
+2. In source: `ALTER SCHEMA public RENAME TO "<tenant>"`, create new `public`, set DB `search_path`.
+3. `pg_dump -n "<tenant>"` to a file (fixes `gin_trgm_ops` schema in dump if present).
+4. Rollback source: restore `public`, reset `search_path`.
+5. In target: create schema `"<tenant>"`, apply dump with `psql -f`.
+
+Extensions from the source DB are created in target `public` if possible; no custom format or `pg_restore`.
+
+## Verification
+
+Built-in (after each tenant in the migration): same tables, row counts, and MD5 checksums per table (optional skip for large tables via `SKIP_CHECKSUM_ABOVE_ROWS`).
+
+Standalone: `npm run verify` [db1 db2 ...]. With no args, uses all tenant DBs from source.
+
+## Other scripts
+
+- `npm run comparison` — load test: separate DBs vs single-DB schemas (writes `heavy-load-results.json`).
+- `npm run many-schemas` / `many-bases` — benchmark helpers.
+- `npm run create-db` — create random DBs for testing.
 
 ## Caveats
 
-- **Schema Mapping Limitation:** The `pg_restore --schema` flag filters dump objects by schema name, but does not remap them. If your source databases contain schemas besides `public`, you may need manual intervention. Always test migration on a single tenant first.
-- **Extensions:** PostgreSQL extensions installed in a source database are *not* restored automatically.
-- **Data Validation:** This tool only checks that the number of tables matches between source and target (via `information_schema.tables`). No further validation (e.g., row counts, checksums). Treat this as a sanity check only.
-
+- Source must have only `public` (or you’ll need to handle other schemas yourself). Test on one tenant first.
+- Extensions are re-created in target from the list in source; some may fail if already present or incompatible.
+- Cleanup wipes all non-system schemas in the target and local migration state; use for dev/test only.

@@ -54,20 +54,21 @@
 //   process.exit(1);
 // });
 
-import { Client } from "pg";
+import fs from "node:fs";
 import pMap from "p-map";
-import fs from "fs";
+import { Client } from "pg";
+import { buildConnectionString, CONFIG } from "../src/config";
 
-const tenants = JSON.parse(fs.readFileSync("./scripts/db-list.json", "utf8"));
+const tenants = JSON.parse(fs.readFileSync(CONFIG.dbListPath, "utf8"));
 
 async function checkDatabase() {
   const client = new Client({
-    connectionString: `postgres://postgres:4321@localhost:5432/tenants`,
+    connectionString: buildConnectionString(CONFIG.target),
   });
 
   await client.connect();
 
-  // Проверяем существующие схемы
+  // Check existing schemas
   const { rows: schemas } = await client.query(`
     SELECT schema_name 
     FROM information_schema.schemata 
@@ -81,7 +82,7 @@ async function checkDatabase() {
     schemas.slice(0, 10).map((s) => s.schema_name),
   );
 
-  // Проверяем есть ли схема из нашего списка
+  // Check if a schema from our list exists
   const firstTenant = tenants[0];
   const { rows: checkSchema } = await client.query(
     `
@@ -94,7 +95,7 @@ async function checkDatabase() {
 
   console.log(`\nChecking if '${firstTenant}' exists:`, checkSchema.length > 0 ? "YES" : "NO");
 
-  // Если схема существует, проверяем таблицы
+  // If schema exists, check its tables
   if (checkSchema.length > 0) {
     const { rows: tables } = await client.query(
       `
@@ -116,7 +117,7 @@ async function checkDatabase() {
 
 async function testSchema(schemaName) {
   const client = new Client({
-    connectionString: `postgres://postgres:4321@localhost:5432/tenants`,
+    connectionString: buildConnectionString(CONFIG.target),
   });
 
   try {
@@ -124,7 +125,7 @@ async function testSchema(schemaName) {
 
     await client.connect();
 
-    const res = await client.query(`SELECT COUNT(*) FROM "${schemaName}".users_data`);
+    const res = await client.query(`SELECT COUNT(*) FROM "${schemaName}"."${CONFIG.benchTable}"`);
 
     await client.end();
 
@@ -147,14 +148,14 @@ async function testSchema(schemaName) {
 }
 
 async function main() {
-  // Сначала диагностика
+  // Run diagnostics first
   await checkDatabase();
 
   console.log("\n\nStarting performance tests...\n");
 
   const results = await pMap(tenants, (schema) => testSchema(schema), { concurrency: 50 });
 
-  // Разделяем успешные и неудачные
+  // Split successful and failed
   const successful = results.filter((r) => r.error === undefined);
   const failed = results.filter((r) => r.error !== undefined);
 
@@ -163,7 +164,8 @@ async function main() {
   if (successful.length > 0) {
     console.table(successful.slice(0, 10));
 
-    const avgMs = successful.filter((r) => r.ms !== null).reduce((sum, r) => sum + r.ms, 0) / successful.length;
+    const avgMs =
+      successful.filter((r) => r.ms !== null).reduce((sum, r) => sum + r.ms, 0) / successful.length;
     const maxMs = Math.max(...successful.filter((r) => r.ms !== null).map((r) => r.ms));
     const minMs = Math.min(...successful.filter((r) => r.ms !== null).map((r) => r.ms));
 

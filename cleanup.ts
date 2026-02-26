@@ -1,16 +1,52 @@
 #!/usr/bin/env ts-node
+
 /**
- * Cleanup script - removes all custom schemas from target database
+ * Cleanup script - removes all custom schemas from target database,
+ * state file, dump directory contents, and migration report.
  * Use only for testing!
  *
- * Usage: ts-node cleanup-schemas.ts
+ * Usage: npm run cleanup  (or ts-node cleanup.ts)
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import { Client } from "pg";
-import fs from "fs";
-import { CONFIG } from "./config";
+import { CONFIG } from "./src/config";
+
+function cleanLocalFiles(): void {
+  // State file
+  if (fs.existsSync(CONFIG.stateFile)) {
+    fs.unlinkSync(CONFIG.stateFile);
+    console.log("Deleted state file:", CONFIG.stateFile);
+  }
+
+  // Migration report
+  const reportPath = "./migration-report.json";
+  if (fs.existsSync(reportPath)) {
+    fs.unlinkSync(reportPath);
+    console.log("Deleted:", reportPath);
+  }
+
+  // Dump directory: remove all files (e.g. *.final.dump)
+  if (fs.existsSync(CONFIG.dumpDir)) {
+    const entries = fs.readdirSync(CONFIG.dumpDir, { withFileTypes: true });
+    let removed = 0;
+    for (const ent of entries) {
+      const full = path.join(CONFIG.dumpDir, ent.name);
+      if (ent.isFile()) {
+        fs.unlinkSync(full);
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      console.log(`Deleted ${removed} file(s) in dump dir: ${CONFIG.dumpDir}`);
+    }
+  }
+}
 
 async function cleanupSchemas(): Promise<void> {
+  cleanLocalFiles();
+
   const client = new Client(CONFIG.target);
 
   try {
@@ -33,25 +69,15 @@ async function cleanupSchemas(): Promise<void> {
     const schemas = rows.map((r: any) => r.schema_name);
 
     if (schemas.length === 0) {
-      console.log("No custom schemas found");
-    } else {
-      console.log(`Found ${schemas.length} schemas to delete:`);
-      schemas.forEach((schema: string) => console.log(`  ${schema}`));
-    }
-
-    // Delete state file if exists
-    if (fs.existsSync(CONFIG.stateFile)) {
-      fs.unlinkSync(CONFIG.stateFile);
-      console.log("Deleted state file:", CONFIG.stateFile);
-    }
-
-    if (schemas.length === 0) {
-      console.log("Cleanup complete");
+      console.log("No custom schemas found. Cleanup complete.");
       return;
     }
 
+    console.log(`Found ${schemas.length} schemas to delete:`);
+    for (const schema of schemas) console.log(`  ${schema}`);
+
     // Confirmation
-    const readline = require("readline").createInterface({
+    const readline = require("node:readline").createInterface({
       input: process.stdin,
       output: process.stdout,
     });

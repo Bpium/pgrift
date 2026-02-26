@@ -1,18 +1,19 @@
-import { Client } from "pg";
+import fs from "node:fs";
 import pMap from "p-map";
-import fs from "fs";
+import { Client } from "pg";
+import { buildConnectionString, CONFIG } from "../src/config";
 
-const tenants = JSON.parse(fs.readFileSync("./scripts/db-list.json", "utf8"));
+const tenants = JSON.parse(fs.readFileSync(CONFIG.dbListPath, "utf8"));
 
 async function testDb(dbName) {
   const client = new Client({
-    connectionString: `postgres://postgres:4321@localhost:5432/${dbName}`,
+    connectionString: buildConnectionString(CONFIG.source, dbName),
   });
 
   const start = performance.now();
   await client.connect();
 
-  const res = await client.query(`SELECT COUNT(*) FROM users_data`);
+  const res = await client.query(`SELECT COUNT(*) FROM "${CONFIG.benchTable}"`);
   await client.end();
 
   const duration = performance.now() - start;
