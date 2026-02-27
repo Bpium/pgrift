@@ -22,6 +22,9 @@ lint-fix:
 format:
 	npm run format
 
+parse:
+	python3 scripts/parse.py
+
 # Show available commands
 help:
 	@just --list

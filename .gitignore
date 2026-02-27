@@ -1,3 +1,8 @@
 node_modules
 tmp
 .env
+
+data
+tiny.json
+big.json
+data.json
