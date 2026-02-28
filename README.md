@@ -18,7 +18,7 @@ Config is read from env (see `.env.example`). Main options: `SOURCE_URL`, `TARGE
 
 | Command | What it does |
 |--------|----------------|
-| `npm run dev` | Run migration (or `just migrate`) |
+| `pgrift` / `npx pgrift` / `npm run dev` | Run migration |
 | `npm run verify` | Compare source DBs vs target schemas: table list, row counts, optional checksums |
 | `npm run cleanup` | Remove all tenant schemas from target, state file, dump dir contents, and `migration-report.json`. Asks for `DELETE ALL` before dropping schemas |
 | `npm run lint` | Run Biome linter (`just lint`) |
@@ -54,3 +54,10 @@ Standalone: `npm run verify` [db1 db2 ...]. With no args, uses all tenant DBs fr
 - Source must have only `public` (or you’ll need to handle other schemas yourself). Test on one tenant first.
 - Extensions are re-created in target from the list in source; some may fail if already present or incompatible.
 - Cleanup wipes all non-system schemas in the target and local migration state; use for dev/test only.
+
+## Publishing to npm
+
+1. Create an account at [npmjs.com](https://www.npmjs.com) and run `npm login`.
+2. Bump version if needed: `npm version patch` (or `minor` / `major`).
+3. Build and publish: `npm run build && npm publish`.
+4. For scoped packages (e.g. `@username/pgrift`): use `npm publish --access public`.

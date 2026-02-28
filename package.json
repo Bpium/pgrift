@@ -1,15 +1,19 @@
 {
   "name": "pgrift",
   "version": "1.0.0",
-  "description": "",
+  "description": "Migrate many PostgreSQL databases (one per tenant) into a single DB with one schema per tenant. Uses pg_dump and psql with resumable state.",
   "license": "ISC",
   "author": "Satoru Fujinuma",
   "type": "commonjs",
   "main": "dist/index.js",
+  "bin": { "pgrift": "./dist/migrate.js" },
+  "repository": { "type": "git", "url": "https://github.com/SatoruFF/pgrift.git" },
+  "keywords": ["postgresql", "migration", "multi-tenant", "pg_dump", "schema"],
   "scripts": {
-    "dev": "npx tsx migrate.ts",
-    "cleanup": "npx tsx cleanup.ts",
-    "verify": "npx tsx verify.ts",
+    "dev": "node dist/migrate.js",
+    "migrate": "node dist/migrate.js",
+    "cleanup": "node dist/cleanup.js",
+    "verify": "node dist/verify.js",
     "create-db": "npx tsx scripts/createRandomDb.test.ts",
     "many-bases": "npx tsx scripts/manyBases.test.ts",
     "many-schemas": "npx tsx scripts/manySchemas.test.ts",
@@ -35,6 +39,8 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "README.md"
-  ]
+    "README.md",
+    ".env.example"
+  ],
+  "engines": { "node": ">=18" }
 }
