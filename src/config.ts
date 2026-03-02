@@ -26,7 +26,7 @@ function resolveConfig(
     const finalConfig = dbEnv ? { ...parsed, database: dbEnv } : parsed;
 
     if (requireDatabase && !finalConfig.database) {
-      throw new Error(`Database name is required in connection string: ${urlEnv}`);
+      throw new Error(`Database name is required(IN TARGET_URL) in connection string: ${urlEnv}`);
     }
 
     return finalConfig;
