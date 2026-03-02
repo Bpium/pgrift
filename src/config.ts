@@ -19,19 +19,32 @@ function resolveConfig(
   userEnv: string | undefined,
   passEnv: string | undefined,
   dbEnv?: string | undefined,
+  requireDatabase: boolean = false,
 ): ClientConfig {
-  console.log("⚠ :: resolveConfig :: urlEnv:", urlEnv);
   if (urlEnv) {
     const parsed = parseConnectionString(urlEnv);
-    return dbEnv ? { ...parsed, database: dbEnv } : parsed;
+    const finalConfig = dbEnv ? { ...parsed, database: dbEnv } : parsed;
+
+    if (requireDatabase && !finalConfig.database) {
+      throw new Error(`Database name is required in connection string: ${urlEnv}`);
+    }
+
+    return finalConfig;
   }
-  return {
+
+  const cfg: ClientConfig = {
     host: hostEnv ?? "localhost",
     port: parseInt(portEnv ?? "5432", 10),
     user: userEnv ?? "postgres",
     password: passEnv ?? "",
     ...(dbEnv ? { database: dbEnv } : {}),
   };
+
+  if (requireDatabase && !cfg.database) {
+    throw new Error(`Database name must be provided via environment variables`);
+  }
+
+  return cfg;
 }
 
 /** Build a connection URL from config and optional database name. */
@@ -59,6 +72,7 @@ export const CONFIG = {
     process.env.TARGET_USER,
     process.env.TARGET_PASSWORD,
     process.env.TARGET_DATABASE,
+    true,
   ),
   dumpDir: process.env.DUMP_DIR ?? "/tmp/pg_migration_dumps",
   stateFile: process.env.STATE_FILE ?? "./migration-state.json",
