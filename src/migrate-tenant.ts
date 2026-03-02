@@ -68,7 +68,7 @@ export async function migrateTenant(dbName: string): Promise<void> {
     });
     rollbackNeeded = false;
 
-    log("info", `  [${dbName}] restoring to target database...`);
+    log("info", `  [${dbName}] restoring to target database  ${tgt.database}...`);
 
     await withClient(tgt, async (client) => {
       await client.query(`DROP SCHEMA IF EXISTS "${dbNameEsc}" CASCADE`);

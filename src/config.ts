@@ -20,6 +20,7 @@ function resolveConfig(
   passEnv: string | undefined,
   dbEnv?: string | undefined,
 ): ClientConfig {
+  console.log("⚠ :: resolveConfig :: urlEnv:", urlEnv);
   if (urlEnv) {
     const parsed = parseConnectionString(urlEnv);
     return dbEnv ? { ...parsed, database: dbEnv } : parsed;
@@ -57,17 +58,12 @@ export const CONFIG = {
     process.env.TARGET_PORT,
     process.env.TARGET_USER,
     process.env.TARGET_PASSWORD,
-    process.env.TARGET_DATABASE ?? "tenants",
+    process.env.TARGET_DATABASE,
   ),
   dumpDir: process.env.DUMP_DIR ?? "/tmp/pg_migration_dumps",
   stateFile: process.env.STATE_FILE ?? "./migration-state.json",
   concurrency: parseInt(process.env.CONCURRENCY ?? "10", 10),
-  excludeDatabases: [
-    "postgres",
-    "template0",
-    "template1",
-    process.env.TARGET_DATABASE ?? "tenants",
-  ],
+  excludeDatabases: ["postgres", "template0", "template1", process.env.TARGET_DATABASE ?? "tenants"],
   filterPrefix: process.env.FILTER_PREFIX ?? null,
   execTimeoutMs: parseInt(process.env.EXEC_TIMEOUT_MS ?? "600000", 10),
   skipChecksumAboveRows: process.env.SKIP_CHECKSUM_ABOVE_ROWS
