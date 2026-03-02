@@ -21,9 +21,11 @@ export async function ensureTargetDatabase(): Promise<void> {
       CONFIG.target.database,
     ]);
     if (rows.length === 0) {
-      await client.query(`CREATE DATABASE "${CONFIG.target.database}"`);
-      log("info", `created database: ${CONFIG.target.database}`);
+      throw new Error(
+        `Target database "${CONFIG.target.database}" does not exist. Please create it manually before running migration.`,
+      );
     }
+    log("info", `target database "${CONFIG.target.database}" exists, proceeding...`);
   });
 }
 
