@@ -8,3 +8,6 @@ big.json
 data.json
 
 dist
+
+migration-report.json
+migration-state.json

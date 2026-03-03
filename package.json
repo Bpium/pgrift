@@ -21,7 +21,7 @@
     "schema"
   ],
   "scripts": {
-    "dev": "node dist/migrate.js",
+    "dev": "npx tsx migrate.ts",
     "migrate": "node dist/migrate.js",
     "cleanup": "node dist/cleanup.js",
     "verify": "node dist/verify.js",
