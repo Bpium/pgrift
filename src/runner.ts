@@ -1,19 +1,19 @@
 import fs from "node:fs";
 import * as readline from "node:readline";
 import { CONFIG } from "./config";
-import { ensureTargetDatabase, getTenants } from "./db";
+import { ensureTargetDatabase, getTenants, getTenantsFromFile } from "./db";
 import { migrateTenant } from "./migrate-tenant";
 import { loadState, saveState } from "./state";
-import type { FailedEntry, State } from "./types";
+import type { FailedEntry, State, TenantEntry } from "./types";
 import { atomicWrite, log } from "./utils";
 import { verifyMigration } from "./verify-migration";
 
-async function runBatch(tenants: string[], state: State): Promise<void> {
+async function runBatch(tenants: TenantEntry[], state: State): Promise<void> {
   const results = await Promise.allSettled(
-    tenants.map(async (db) => {
-      await migrateTenant(db);
+    tenants.map(async ({ db, source }) => {
+      await migrateTenant(db, source);
 
-      const { ok, reasons } = await verifyMigration(db);
+      const { ok, reasons } = await verifyMigration(db, source);
       if (!ok) {
         throw new Error(`verification failed: ${reasons.join(" | ")}`);
       }
@@ -23,7 +23,7 @@ async function runBatch(tenants: string[], state: State): Promise<void> {
   );
 
   for (let i = 0; i < results.length; i++) {
-    const db = tenants[i];
+    const db = tenants[i].db;
     const result = results[i];
 
     if (result.status === "fulfilled") {
@@ -67,9 +67,18 @@ export async function runMigration(): Promise<void> {
   await ensureTargetDatabase();
 
   const state = loadState();
-  const allTenants = await getTenants();
+
+  let allTenants: TenantEntry[];
+  if (CONFIG.dbListFile) {
+    log("info", `loading tenant list from file: ${CONFIG.dbListFile}`);
+    allTenants = getTenantsFromFile(CONFIG.dbListFile);
+  } else {
+    const dbNames = await getTenants();
+    allTenants = dbNames.map((db) => ({ db }));
+  }
+
   const completed = new Set(state.completed);
-  const remaining = allTenants.filter((db) => !completed.has(db));
+  const remaining = allTenants.filter(({ db }) => !completed.has(db));
 
   log(
     "info",
@@ -82,7 +91,7 @@ export async function runMigration(): Promise<void> {
     return;
   }
 
-  const batches: string[][] = [];
+  const batches: TenantEntry[][] = [];
   for (let i = 0; i < remaining.length; i += CONFIG.concurrency) {
     batches.push(remaining.slice(i, i + CONFIG.concurrency));
   }

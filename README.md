@@ -8,56 +8,121 @@ Moves many PostgreSQL databases (one per tenant) into a single DB: each tenant b
 
 ```bash
 cp .env.example .env
-# edit .env: SOURCE_URL, TARGET_URL (and optionally DUMP_DIR, STATE_FILE, CONCURRENCY, FILTER_PREFIX)
+# edit .env: SOURCE_URL, TARGET_URL, and other options
 npm install
 ```
 
-Config is read from env (see `.env.example`). Main options: `SOURCE_URL`, `TARGET_URL`, `TARGET_DATABASE` (default `tenants`), `DUMP_DIR`, `STATE_FILE`, `CONCURRENCY`, `FILTER_PREFIX` (e.g. `bench_db_` to only migrate those DBs).
+## Configuration
+
+All config is read from env (see `.env.example`).
+
+### Connection
+
+| Variable | Description |
+|----------|-------------|
+| `SOURCE_URL` | Source PostgreSQL connection string (no database — tenant DBs are discovered from it) |
+| `TARGET_URL` | Target PostgreSQL connection string including database name |
+| `TARGET_DATABASE` | Target database name (default: `tenants`). **Must already exist** |
+| `SSL` | Set to `true` to enable SSL for all connections and pg_dump/psql (required for Yandex Cloud and other managed PG) |
+
+### Tenant discovery — choose one of two options
+
+**Option 1 — auto-discover from source (default):**
+
+All databases on the source server are migrated, excluding system ones. Use `FILTER_PREFIX` to narrow down.
+
+| Variable | Description |
+|----------|-------------|
+| `FILTER_PREFIX` | Only migrate DBs whose name starts with this prefix (e.g. `bench_db_`) |
+
+**Option 2 — explicit list via JSON file:**
+
+Set `DB_LIST_FILE` to a path of a JSON file with an array of connection strings. Each entry is a full PostgreSQL connection string including the database name. When set, `SOURCE_URL` and `FILTER_PREFIX` are ignored for tenant discovery.
+
+```json
+[
+  "postgresql://user:pass@host1:5432/tenant_a",
+  "postgresql://user:pass@host2:5432/tenant_b",
+  "postgresql://user:pass@host1:5432/tenant_c"
+]
+```
+
+```env
+DB_LIST_FILE=./db-list.json
+```
+
+This is useful when:
+- Tenants live on different servers
+- You need to migrate a specific subset without a shared prefix
+- You are on a managed platform (e.g. Yandex Cloud) that disallows `CREATE DATABASE`
+
+### Other options
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DUMP_DIR` | `/tmp/pg_migration_dumps` | Temp directory for dump files |
+| `STATE_FILE` | `./migration-state.json` | Resume state file |
+| `CONCURRENCY` | `10` | Number of tenants to process in parallel |
+| `EXEC_TIMEOUT_MS` | `600000` | Timeout for pg_dump / psql commands (ms) |
+| `SKIP_CHECKSUM_ABOVE_ROWS` | — | Skip MD5 checksum for tables with more rows than this |
 
 ## Commands
 
 | Command | What it does |
-|--------|----------------|
+|---------|--------------|
 | `pgrift` / `npx pgrift` / `npm run dev` | Run migration |
-| `npm run verify` | Compare source DBs vs target schemas: table list, row counts, optional checksums |
-| `npm run cleanup` | Remove all tenant schemas from target, state file, dump dir contents, and `migration-report.json`. Asks for `DELETE ALL` before dropping schemas |
-| `npm run lint` | Run Biome linter (`just lint`) |
+| `npm run verify` | Compare source DBs vs target schemas: table list, row counts, checksums |
+| `npm run cleanup` | Remove all tenant schemas from target, state file, dump dir contents, and `migration-report.json` |
+| `npm run lint` | Run Biome linter |
 | `npm run lint:fix` | Lint and apply safe fixes |
 | `npm run format` | Format code with Biome |
 
-After an interrupt, run `npm run dev` again; completed tenants are skipped.
+After an interrupt, run again — completed tenants are skipped automatically.
 
 ## What the migration does per tenant
 
 1. Terminate connections to the source DB.
 2. In source: `ALTER SCHEMA public RENAME TO "<tenant>"`, create new `public`, set DB `search_path`.
-3. `pg_dump -n "<tenant>"` to a file (fixes `gin_trgm_ops` schema in dump if present).
+3. `pg_dump -n "<tenant>"` to a file (fixes `gin_trgm_ops` schema reference in dump if present).
 4. Rollback source: restore `public`, reset `search_path`.
-5. In target: create schema `"<tenant>"`, apply dump with `psql -f`.
-
-Extensions from the source DB are created in target `public` if possible; no custom format or `pg_restore`.
+5. In target: drop schema `"<tenant>"` if exists, create extensions, apply dump with `psql -f`.
+6. Verify: compare table list, row counts, and MD5 checksums.
 
 ## Verification
 
-Built-in (after each tenant in the migration): same tables, row counts, and MD5 checksums per table (optional skip for large tables via `SKIP_CHECKSUM_ABOVE_ROWS`).
+Built-in verification runs automatically after each tenant. It checks:
+- All tables present in target schema
+- Row counts match
+- MD5 checksums match (skipped for tables above `SKIP_CHECKSUM_ABOVE_ROWS`)
 
-Standalone: `npm run verify` [db1 db2 ...]. With no args, uses all tenant DBs from source.
+Standalone: `npm run verify [db1 db2 ...]`. With no args, uses all tenant DBs from source.
+
+## Yandex Cloud / managed PostgreSQL
+
+Managed platforms typically disallow `CREATE DATABASE` via SQL. pgrift handles this — the target database must be **created manually** via the cloud console, then referenced in `TARGET_URL`. The migration verifies it exists and fails with a clear error if not.
+
+Enable SSL:
+
+```env
+SSL=true
+```
 
 ## Other scripts
 
-- `npm run comparison` — load test: separate DBs vs single-DB schemas (writes `heavy-load-results.json`).
+- `npm run comparison` — load test: separate DBs vs single-DB schemas.
 - `npm run many-schemas` / `many-bases` — benchmark helpers.
 - `npm run create-db` — create random DBs for testing.
 
 ## Caveats
 
-- Source must have only `public` (or you’ll need to handle other schemas yourself). Test on one tenant first.
-- Extensions are re-created in target from the list in source; some may fail if already present or incompatible.
-- Cleanup wipes all non-system schemas in the target and local migration state; use for dev/test only.
+- Source must have only `public` schema. Test on one tenant first.
+- Extensions are re-created in target from source list; some may fail if already present.
+- Cleanup wipes all non-system schemas in target and local state — dev/test only.
+- The target database must exist before running migration.
 
 ## Publishing to npm
 
-1. Create an account at [npmjs.com](https://www.npmjs.com) and run `npm login`.
-2. Bump version if needed: `npm version patch` (or `minor` / `major`).
-3. Build and publish: `npm run build && npm publish`.
-4. For scoped packages (e.g. `@username/pgrift`): use `npm publish --access public`.
+1. `npm login`
+2. `npm version patch` (or `minor` / `major`)
+3. `npm run build && npm publish`
+4. Scoped package: `npm publish --access public`

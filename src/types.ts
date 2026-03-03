@@ -1,3 +1,10 @@
+import type { ClientConfig } from "pg";
+
+export interface TenantEntry {
+  db: string;
+  source?: ClientConfig; // if undefined, falls back to CONFIG.source
+}
+
 export interface FailedEntry {
   db: string;
   error: string;

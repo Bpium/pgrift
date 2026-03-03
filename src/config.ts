@@ -1,7 +1,7 @@
 import "dotenv/config";
 import type { ClientConfig } from "pg";
 
-function parseConnectionString(url: string): ClientConfig {
+export function parseConnectionString(url: string): ClientConfig {
   const u = new URL(url);
   return {
     host: u.hostname,
@@ -74,6 +74,8 @@ export const CONFIG = {
     process.env.TARGET_DATABASE,
     true,
   ),
+  ssl: process.env.SSL === "true",
+  dbListFile: process.env.DB_LIST_FILE ?? null,
   dumpDir: process.env.DUMP_DIR ?? "/tmp/pg_migration_dumps",
   stateFile: process.env.STATE_FILE ?? "./migration-state.json",
   concurrency: parseInt(process.env.CONCURRENCY ?? "10", 10),

@@ -1,14 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { ClientConfig } from "pg";
 import { CONFIG } from "./config";
 import { withClient } from "./db";
 import { assertDiskSpace } from "./disk";
 import { exec, log } from "./utils";
 
-export async function migrateTenant(dbName: string): Promise<void> {
+export async function migrateTenant(dbName: string, sourceOverride?: ClientConfig): Promise<void> {
   const finalDumpFile = path.join(CONFIG.dumpDir, `${dbName}.final.dump`);
 
-  const src = CONFIG.source;
+  const src = sourceOverride ?? CONFIG.source;
   const tgt = CONFIG.target;
 
   const srcPw = String(src.password ?? "");

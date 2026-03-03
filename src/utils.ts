@@ -25,7 +25,11 @@ export function atomicWrite(filePath: string, data: string): void {
 
 export function exec(cmd: string, password: string): void {
   const opts: ExecSyncOptions = {
-    env: { ...process.env, PGPASSWORD: password },
+    env: {
+      ...process.env,
+      PGPASSWORD: password,
+      ...(CONFIG.ssl ? { PGSSLMODE: "require" } : {}),
+    },
     stdio: "pipe",
     timeout: CONFIG.execTimeoutMs ?? 10 * 60 * 1000,
   };

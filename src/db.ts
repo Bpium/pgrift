@@ -1,12 +1,15 @@
+import fs from "node:fs";
 import { Client } from "pg";
-import { CONFIG } from "./config";
+import { CONFIG, parseConnectionString } from "./config";
+import type { TenantEntry } from "./types";
 import { log } from "./utils";
 
 export async function withClient<T>(
   config: object,
   fn: (client: Client) => Promise<T>,
 ): Promise<T> {
-  const client = new Client(config);
+  const sslConfig = CONFIG.ssl ? { ssl: { rejectUnauthorized: false } } : {};
+  const client = new Client({ ...sslConfig, ...config });
   await client.connect();
   try {
     return await fn(client);
@@ -26,6 +29,26 @@ export async function ensureTargetDatabase(): Promise<void> {
       );
     }
     log("info", `target database "${CONFIG.target.database}" exists, proceeding...`);
+  });
+}
+
+export function getTenantsFromFile(filePath: string): TenantEntry[] {
+  const content = fs.readFileSync(filePath, "utf-8");
+  const entries: unknown = JSON.parse(content);
+
+  if (!Array.isArray(entries)) {
+    throw new Error(`DB_LIST_FILE must contain a JSON array of connection strings`);
+  }
+
+  return entries.map((entry, i) => {
+    if (typeof entry !== "string") {
+      throw new Error(`DB_LIST_FILE entry at index ${i} must be a connection string, got ${typeof entry}`);
+    }
+    const source = parseConnectionString(entry);
+    if (!source.database) {
+      throw new Error(`Connection string at index ${i} must include a database name: ${entry}`);
+    }
+    return { db: source.database, source };
   });
 }
 

@@ -1,4 +1,4 @@
-import type { Client } from "pg";
+import type { Client, ClientConfig } from "pg";
 import { CONFIG } from "./config";
 import { withClient } from "./db";
 import { log } from "./utils";
@@ -43,10 +43,11 @@ export async function tableChecksum(
   return rows[0]?.checksum ?? "null";
 }
 
-export async function verifyMigration(dbName: string): Promise<{ ok: boolean; reasons: string[] }> {
+export async function verifyMigration(dbName: string, sourceOverride?: ClientConfig): Promise<{ ok: boolean; reasons: string[] }> {
   const reasons: string[] = [];
+  const src = sourceOverride ?? CONFIG.source;
 
-  await withClient({ ...CONFIG.source, database: dbName }, async (srcClient) => {
+  await withClient({ ...src, database: dbName }, async (srcClient) => {
     await withClient(CONFIG.target, async (tgtClient) => {
       const { rows: srcTables } = await srcClient.query<{
         table_name: string;
