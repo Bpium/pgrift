@@ -28,7 +28,7 @@ export async function migrateTenant(dbName: string, sourceOverride?: ClientConfi
   let rollbackNeeded = false;
   try {
     log("info", `  [${dbName}] terminating connections...`);
-    await withClient({ ...src, database: "postgres" }, async (client) => {
+    await withClient({ ...src, database: dbName }, async (client) => {
       await client.query(
         `SELECT pg_terminate_backend(pid)
          FROM pg_stat_activity

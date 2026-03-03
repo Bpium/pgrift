@@ -76,6 +76,7 @@ export const CONFIG = {
   ),
   ssl: process.env.SSL === "true",
   dbListFile: process.env.DB_LIST_FILE ?? null,
+  sourceDiscoveryDatabase: process.env.SOURCE_DISCOVERY_DATABASE ?? null,
   dumpDir: process.env.DUMP_DIR ?? "/tmp/pg_migration_dumps",
   stateFile: process.env.STATE_FILE ?? "./migration-state.json",
   concurrency: parseInt(process.env.CONCURRENCY ?? "10", 10),

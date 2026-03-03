@@ -19,17 +19,17 @@ export async function withClient<T>(
 }
 
 export async function ensureTargetDatabase(): Promise<void> {
-  await withClient({ ...CONFIG.target, database: "postgres" }, async (client) => {
-    const { rows } = await client.query("SELECT 1 FROM pg_database WHERE datname = $1", [
-      CONFIG.target.database,
-    ]);
-    if (rows.length === 0) {
-      throw new Error(
-        `Target database "${CONFIG.target.database}" does not exist. Please create it manually before running migration.`,
-      );
-    }
+  try {
+    await withClient(CONFIG.target, async (client) => {
+      await client.query("SELECT 1");
+    });
     log("info", `target database "${CONFIG.target.database}" exists, proceeding...`);
-  });
+  } catch (err) {
+    throw new Error(
+      `Target database "${CONFIG.target.database}" does not exist or is not accessible. ` +
+        `Please create it manually before running migration. Original error: ${err}`,
+    );
+  }
 }
 
 export function getTenantsFromFile(filePath: string): TenantEntry[] {
@@ -53,7 +53,8 @@ export function getTenantsFromFile(filePath: string): TenantEntry[] {
 }
 
 export async function getTenants(): Promise<string[]> {
-  return withClient({ ...CONFIG.source, database: "postgres" }, async (client) => {
+  const discoveryDb = CONFIG.sourceDiscoveryDatabase ?? "postgres";
+  return withClient({ ...CONFIG.source, database: discoveryDb }, async (client) => {
     const placeholders = CONFIG.excludeDatabases.map((_, i) => `$${i + 1}`).join(", ");
     const { rows } = await client.query<{ datname: string }>(
       `SELECT datname FROM pg_database

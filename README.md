@@ -60,6 +60,7 @@ This is useful when:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `SOURCE_DISCOVERY_DATABASE` | `postgres` | Database to connect to on the source server when discovering tenants via `pg_database`. On managed platforms (e.g. Yandex Cloud) the system `postgres` database is often inaccessible — set this to any existing DB the user has access to |
 | `DUMP_DIR` | `/tmp/pg_migration_dumps` | Temp directory for dump files |
 | `STATE_FILE` | `./migration-state.json` | Resume state file |
 | `CONCURRENCY` | `10` | Number of tenants to process in parallel |
@@ -101,11 +102,14 @@ Standalone: `npm run verify [db1 db2 ...]`. With no args, uses all tenant DBs fr
 
 Managed platforms typically disallow `CREATE DATABASE` via SQL. pgrift handles this — the target database must be **created manually** via the cloud console, then referenced in `TARGET_URL`. The migration verifies it exists and fails with a clear error if not.
 
-Enable SSL:
+Managed platforms also restrict access to the system `postgres` database. pgrift uses it by default to discover tenant DBs (`SELECT datname FROM pg_database`). If your user can't connect to `postgres`, set `SOURCE_DISCOVERY_DATABASE` to any existing DB they do have access to:
 
 ```env
 SSL=true
+SOURCE_DISCOVERY_DATABASE=some_existing_db
 ```
+
+The discovery database is only used to read the list of databases — no data is modified in it.
 
 ## Other scripts
 
