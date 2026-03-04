@@ -36,6 +36,7 @@
     "prepare": "npm run build"
   },
   "dependencies": {
+    "chalk": "^4.1.2",
     "dotenv": "^17.3.1",
     "p-map": "^7.0.4",
     "pg": "^8.18.0"

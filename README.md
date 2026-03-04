@@ -1,6 +1,6 @@
 # pgrift
 
-Moves many PostgreSQL databases (one per tenant) into a single DB: each tenant becomes a schema. Uses in-place rename on source (`public` → tenant name), `pg_dump`, then `psql` into the target. State is saved so you can resume after a crash.
+Moves many PostgreSQL databases (one per tenant) into a single DB: each tenant becomes a schema. Dumps the `public` schema, rewrites references to the target schema name, then restores via `psql` into the target. State is saved so you can resume after a crash.
 
 **Requires:** Node 18+, `pg_dump` and `psql` in PATH.
 
@@ -56,15 +56,38 @@ This is useful when:
 - You need to migrate a specific subset without a shared prefix
 - You are on a managed platform (e.g. Yandex Cloud) that disallows `CREATE DATABASE`
 
+### Schema rename strategy
+
+pgrift supports two strategies for renaming the `public` schema during migration:
+
+| Strategy | `SCHEMA_RENAME_STRATEGY` | Source DB modified? | Requires schema ownership? |
+|----------|--------------------------|---------------------|---------------------------|
+| **Dump rewrite** (default) | `rewrite` | No | No |
+| **In-place rename** | `rename` | Yes (rolled back) | Yes |
+
+**`rewrite`** (default) — Dumps the `public` schema as-is, then rewrites all schema references (`public.*` → `"<tenant>".*`) directly in the dump file before restoring. The source database is never modified. Works on managed platforms (Yandex Cloud, etc.) where the DB user is not the owner of the `public` schema.
+
+**`rename`** — Renames the `public` schema in the source database via `ALTER SCHEMA public RENAME TO "<tenant>"`, dumps, then rolls back the rename. Requires the DB user to be the **owner** of the `public` schema. Use this on self-managed PostgreSQL where you have full control.
+
+```env
+# Default — works everywhere, including managed PG:
+SCHEMA_RENAME_STRATEGY=rewrite
+
+# Self-managed PG where user owns public schema:
+SCHEMA_RENAME_STRATEGY=rename
+```
+
 ### Other options
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `SCHEMA_RENAME_STRATEGY` | `rewrite` | Schema rename strategy: `rewrite` (dump file rewrite, no source modification) or `rename` (in-place ALTER SCHEMA, requires ownership) |
+| `SOURCE_READONLY` | `false` | After a successful dump, set the source DB to read-only (`ALTER DATABASE … SET default_transaction_read_only = true`). Useful during cutover to prevent new writes landing in the old location. Wrapped in try/catch — never blocks migration if the user lacks `ALTER DATABASE` privilege |
 | `SOURCE_DISCOVERY_DATABASE` | `postgres` | Database to connect to on the source server when discovering tenants via `pg_database`. On managed platforms (e.g. Yandex Cloud) the system `postgres` database is often inaccessible — set this to any existing DB the user has access to |
 | `DUMP_DIR` | `/tmp/pg_migration_dumps` | Temp directory for dump files |
 | `STATE_FILE` | `./migration-state.json` | Resume state file |
 | `CONCURRENCY` | `10` | Number of tenants to process in parallel |
-| `EXEC_TIMEOUT_MS` | `600000` | Timeout for pg_dump / psql commands (ms) |
+| `EXEC_TIMEOUT_MS` | `3600000` | Timeout for pg_dump / psql commands (ms). Increase for large databases or slow networks |
 | `SKIP_CHECKSUM_ABOVE_ROWS` | — | Skip MD5 checksum for tables with more rows than this |
 
 ## Commands
@@ -81,6 +104,16 @@ This is useful when:
 After an interrupt, run again — completed tenants are skipped automatically.
 
 ## What the migration does per tenant
+
+**With `SCHEMA_RENAME_STRATEGY=rewrite` (default):**
+
+1. Terminate connections to the source DB.
+2. `pg_dump -n public` — dump the public schema as-is.
+3. Rewrite the dump file: replace all `public` schema references with `"<tenant>"` (safely skips COPY data blocks).
+4. In target: drop schema `"<tenant>"` if exists, create extensions, apply dump with `psql -f`.
+5. Verify: compare table list, row counts, and MD5 checksums.
+
+**With `SCHEMA_RENAME_STRATEGY=rename`:**
 
 1. Terminate connections to the source DB.
 2. In source: `ALTER SCHEMA public RENAME TO "<tenant>"`, create new `public`, set DB `search_path`.

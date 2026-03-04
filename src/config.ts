@@ -75,6 +75,8 @@ export const CONFIG = {
     true,
   ),
   ssl: process.env.SSL === "true",
+  schemaRenameStrategy: (process.env.SCHEMA_RENAME_STRATEGY ?? "rewrite") as "rewrite" | "rename",
+  sourceReadonly: process.env.SOURCE_READONLY === "true",
   dbListFile: process.env.DB_LIST_FILE ?? null,
   sourceDiscoveryDatabase: process.env.SOURCE_DISCOVERY_DATABASE ?? null,
   dumpDir: process.env.DUMP_DIR ?? "/tmp/pg_migration_dumps",
@@ -82,7 +84,7 @@ export const CONFIG = {
   concurrency: parseInt(process.env.CONCURRENCY ?? "10", 10),
   excludeDatabases: ["postgres", "template0", "template1", process.env.TARGET_DATABASE ?? "tenants"],
   filterPrefix: process.env.FILTER_PREFIX ?? null,
-  execTimeoutMs: parseInt(process.env.EXEC_TIMEOUT_MS ?? "600000", 10),
+  execTimeoutMs: parseInt(process.env.EXEC_TIMEOUT_MS ?? "3600000", 10),
   skipChecksumAboveRows: process.env.SKIP_CHECKSUM_ABOVE_ROWS
     ? parseInt(process.env.SKIP_CHECKSUM_ABOVE_ROWS, 10)
     : undefined,
