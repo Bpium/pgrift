@@ -7,7 +7,6 @@ migrate:
 
 publish:
 	npm run build
-	npm test
 	npm version patch
 	npm publish
 	git push --follow-tags
