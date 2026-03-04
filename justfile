@@ -5,6 +5,13 @@ _default:
 migrate:
 	npm run dev
 
+publish:
+	npm run build
+	npm test
+	npm version patch
+	npm publish
+	git push --follow-tags
+
 # Cleanup database schemas
 clean:
 	npm run cleanup
