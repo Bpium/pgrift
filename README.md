@@ -87,7 +87,7 @@ SCHEMA_RENAME_STRATEGY=rename
 | `DUMP_DIR` | `/tmp/pg_migration_dumps` | Temp directory for dump files |
 | `STATE_FILE` | `./migration-state.json` | Resume state file |
 | `CONCURRENCY` | `10` | Number of tenants to process in parallel |
-| `EXEC_TIMEOUT_MS` | `3600000` | Timeout for pg_dump / psql commands (ms). Increase for large databases or slow networks |
+| `EXEC_TIMEOUT_MS` | `0` | Hard process timeout for pg_dump / psql (ms). `0` = no timeout (default). PostgreSQL-level timeouts are already disabled via `PGOPTIONS`. Set this only if you want a safety kill for completely hung processes |
 | `SKIP_CHECKSUM_ABOVE_ROWS` | — | Skip MD5 checksum for tables with more rows than this |
 
 ## Commands

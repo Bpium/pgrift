@@ -84,7 +84,7 @@ export const CONFIG = {
   concurrency: parseInt(process.env.CONCURRENCY ?? "10", 10),
   excludeDatabases: ["postgres", "template0", "template1", process.env.TARGET_DATABASE ?? "tenants"],
   filterPrefix: process.env.FILTER_PREFIX ?? null,
-  execTimeoutMs: parseInt(process.env.EXEC_TIMEOUT_MS ?? "3600000", 10),
+  execTimeoutMs: process.env.EXEC_TIMEOUT_MS ? parseInt(process.env.EXEC_TIMEOUT_MS, 10) : 0,
   skipChecksumAboveRows: process.env.SKIP_CHECKSUM_ABOVE_ROWS
     ? parseInt(process.env.SKIP_CHECKSUM_ABOVE_ROWS, 10)
     : undefined,

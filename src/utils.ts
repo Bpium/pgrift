@@ -42,7 +42,8 @@ export function exec(cmd: string, password: string): void {
       PGOPTIONS: "-c statement_timeout=0 -c lock_timeout=0 -c idle_in_transaction_session_timeout=0",
     },
     stdio: "pipe",
-    timeout: CONFIG.execTimeoutMs,
+    // 0 = no timeout (default). PostgreSQL-level timeouts are handled via PGOPTIONS above.
+    ...(CONFIG.execTimeoutMs > 0 ? { timeout: CONFIG.execTimeoutMs } : {}),
   };
   execSync(cmd, opts);
 }
