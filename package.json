@@ -1,6 +1,6 @@
 {
   "name": "pgrift",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Migrate many PostgreSQL databases (one per tenant) into a single DB with one schema per tenant. Uses pg_dump and psql with resumable state.",
   "license": "ISC",
   "author": "Satoru Fujinuma",
