@@ -45,5 +45,32 @@ export function exec(cmd: string, password: string): void {
     // 0 = no timeout (default). PostgreSQL-level timeouts are handled via PGOPTIONS above.
     ...(CONFIG.execTimeoutMs > 0 ? { timeout: CONFIG.execTimeoutMs } : {}),
   };
-  execSync(cmd, opts);
+
+  try {
+    execSync(cmd, opts);
+  } catch (err: unknown) {
+    // Extract the actual PostgreSQL / pg_dump error from stderr
+    const stderr =
+      err instanceof Error && "stderr" in err
+        ? String((err as NodeJS.ErrnoException & { stderr: Buffer }).stderr).trim()
+        : "";
+    const fallback = err instanceof Error ? err.message : String(err);
+    throw new Error(stderr || fallback);
+  }
+}
+
+/**
+ * Checks that required PostgreSQL client binaries are available in PATH.
+ * Called once at startup before any migration work begins.
+ */
+export function checkBinaries(): void {
+  for (const bin of ["pg_dump", "psql"]) {
+    try {
+      execSync(`${bin} --version`, { stdio: "pipe" });
+    } catch {
+      throw new Error(
+        `"${bin}" not found in PATH. Please install PostgreSQL client tools (v14+) and make sure they are accessible.`,
+      );
+    }
+  }
 }

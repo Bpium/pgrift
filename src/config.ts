@@ -77,6 +77,8 @@ export const CONFIG = {
   ssl: process.env.SSL === "true",
   schemaRenameStrategy: (process.env.SCHEMA_RENAME_STRATEGY ?? "rewrite") as "rewrite" | "rename",
   sourceReadonly: process.env.SOURCE_READONLY === "true",
+  dryRun: process.env.DRY_RUN === "true",
+  maxRetries: parseInt(process.env.MAX_RETRIES ?? "3", 10),
   dbListFile: process.env.DB_LIST_FILE ?? null,
   sourceDiscoveryDatabase: process.env.SOURCE_DISCOVERY_DATABASE ?? null,
   dumpDir: process.env.DUMP_DIR ?? "/tmp/pg_migration_dumps",

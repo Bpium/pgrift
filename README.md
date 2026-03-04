@@ -87,6 +87,8 @@ SCHEMA_RENAME_STRATEGY=rename
 | `DUMP_DIR` | `/tmp/pg_migration_dumps` | Temp directory for dump files |
 | `STATE_FILE` | `./migration-state.json` | Resume state file |
 | `CONCURRENCY` | `10` | Number of tenants to process in parallel |
+| `MAX_RETRIES` | `3` | Max attempts per tenant before it is skipped for the rest of the run. Exhausted tenants are clearly reported and can be retried manually |
+| `DRY_RUN` | `false` | Print which tenants would be migrated without touching any data |
 | `EXEC_TIMEOUT_MS` | `0` | Hard process timeout for pg_dump / psql (ms). `0` = no timeout (default). PostgreSQL-level timeouts are already disabled via `PGOPTIONS`. Set this only if you want a safety kill for completely hung processes |
 | `SKIP_CHECKSUM_ABOVE_ROWS` | — | Skip MD5 checksum for tables with more rows than this |
 
@@ -101,7 +103,7 @@ SCHEMA_RENAME_STRATEGY=rename
 | `npm run lint:fix` | Lint and apply safe fixes |
 | `npm run format` | Format code with Biome |
 
-After an interrupt, run again — completed tenants are skipped automatically.
+After an interrupt (`Ctrl+C`), pgrift finishes the current batch, saves state, and exits cleanly. Run again — completed tenants are skipped automatically.
 
 ## What the migration does per tenant
 
