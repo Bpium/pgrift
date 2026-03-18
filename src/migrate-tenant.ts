@@ -129,15 +129,17 @@ async function dumpWithRewrite(
   srcPw: string,
   finalDumpFile: string,
 ): Promise<void> {
+  // Set source to read-only BEFORE dumping so no new writes can sneak in
+  // between the snapshot and the verification step
+  if (CONFIG.sourceReadonly) {
+    await setSourceReadonly(src, dbName, dbNameEsc);
+  }
+
   log("info", `  [${dbName}] dumping public schema...`);
   exec(
     ["pg_dump", pgFlags(src, dbName), `-n public`, `--no-owner`, `--no-acl`, `-f "${finalDumpFile}"`].join(" "),
     srcPw,
   );
-
-  if (CONFIG.sourceReadonly) {
-    await setSourceReadonly(src, dbName, dbNameEsc);
-  }
 
   log("info", `  [${dbName}] rewriting schema references in dump...`);
   const rawDump = fs.readFileSync(finalDumpFile, "utf-8");
@@ -168,6 +170,11 @@ async function dumpWithRename(
     });
     rollbackNeeded = true;
 
+    // Set source to read-only BEFORE dumping so no new writes can sneak in
+    if (CONFIG.sourceReadonly) {
+      await setSourceReadonly(src, dbName, dbNameEsc);
+    }
+
     log("info", `  [${dbName}] dumping renamed schema...`);
     exec(
       [
@@ -180,10 +187,6 @@ async function dumpWithRename(
       ].join(" "),
       srcPw,
     );
-
-    if (CONFIG.sourceReadonly) {
-      await setSourceReadonly(src, dbName, dbNameEsc);
-    }
 
     log("info", `  [${dbName}] rolling back source schema...`);
     await withClient({ ...src, database: dbName }, async (client) => {
