@@ -3,6 +3,7 @@ import type { ClientConfig } from "pg";
 export interface TenantEntry {
   db: string;
   source?: ClientConfig; // if undefined, falls back to CONFIG.source
+  bpiumId?: number;      // Bpium record ID for post-migration schema update
 }
 
 export interface FailedEntry {

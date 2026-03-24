@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import * as readline from "node:readline";
+import { updateBpiumSchema } from "./bpium";
 import { CONFIG } from "./config";
 import { ensureTargetDatabase, getTenants, getTenantsFromFile } from "./db";
 import { migrateTenant } from "./migrate-tenant";
@@ -30,12 +31,16 @@ function registerShutdownHandlers(): void {
 
 async function runBatch(tenants: TenantEntry[], state: State): Promise<void> {
   const results = await Promise.allSettled(
-    tenants.map(async ({ db, source }) => {
+    tenants.map(async ({ db, source, bpiumId }) => {
       await migrateTenant(db, source);
 
       const { ok, reasons } = await verifyMigration(db, source);
       if (!ok) {
         throw new Error(`verification failed: ${reasons.join(" | ")}`);
+      }
+
+      if (bpiumId !== undefined) {
+        await updateBpiumSchema(bpiumId, db);
       }
 
       return db;

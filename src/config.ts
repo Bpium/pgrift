@@ -106,4 +106,29 @@ export const CONFIG = {
   createDbPrefix: process.env.CREATE_DB_PREFIX ?? "bench_db_",
   /** createRandomDb script: path to project that runs postinstall-dev for each DB. Optional. */
   createDbProjectPath: process.env.CREATE_DB_PROJECT_PATH ?? null,
+
+  /**
+   * Bpium admin API — optional, only active when BPIUM_API_BASE is set.
+   * After each successful migration the script will PATCH the record's $schema field.
+   *
+   * Required env vars:
+   *   BPIUM_API_BASE      — e.g. https://admin.bpium.ru
+   *   BPIUM_CATALOG_ID    — catalog segment in the URL, e.g. $companies
+   *   BPIUM_SCHEMA_NAME   — schema name to write into the $schema field
+   *   BPIUM_LOGIN         — Basic auth login
+   *   BPIUM_PASSWORD      — Basic auth password
+   *
+   * Optional:
+   *   BPIUM_TIMEZONE_OFFSET — default 180
+   */
+  bpium: process.env.BPIUM_API_BASE
+    ? {
+        apiBase: process.env.BPIUM_API_BASE,
+        catalogId: process.env.BPIUM_CATALOG_ID ?? "$companies",
+        schemaName: process.env.BPIUM_SCHEMA_NAME ?? "",
+        login: process.env.BPIUM_LOGIN ?? "",
+        password: process.env.BPIUM_PASSWORD ?? "",
+        timezoneOffset: parseInt(process.env.BPIUM_TIMEZONE_OFFSET ?? "180", 10),
+      }
+    : null,
 };
