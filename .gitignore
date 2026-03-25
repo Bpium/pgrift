@@ -11,3 +11,5 @@ dist
 
 migration-report.json
 migration-state.json
+
+dbs.json
