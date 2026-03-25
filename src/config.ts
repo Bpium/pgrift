@@ -109,12 +109,13 @@ export const CONFIG = {
 
   /**
    * Bpium admin API — optional, only active when BPIUM_API_BASE is set.
-   * After each successful migration the script will PATCH the record's $schema field.
+   * After each successful migration the script will PATCH the record's $schema and $database fields.
+   * $schema is set to the tenant's dbName (= schema name in the target DB).
+   * $database is set to the target database name (from TARGET_URL).
    *
    * Required env vars:
    *   BPIUM_API_BASE      — e.g. https://admin.bpium.ru
    *   BPIUM_CATALOG_ID    — catalog segment in the URL, e.g. $companies
-   *   BPIUM_SCHEMA_NAME   — schema name to write into the $schema field
    *   BPIUM_LOGIN         — Basic auth login
    *   BPIUM_PASSWORD      — Basic auth password
    *
@@ -125,7 +126,6 @@ export const CONFIG = {
     ? {
         apiBase: process.env.BPIUM_API_BASE,
         catalogId: process.env.BPIUM_CATALOG_ID ?? "$companies",
-        schemaName: process.env.BPIUM_SCHEMA_NAME ?? "",
         login: process.env.BPIUM_LOGIN ?? "",
         password: process.env.BPIUM_PASSWORD ?? "",
         timezoneOffset: parseInt(process.env.BPIUM_TIMEZONE_OFFSET ?? "180", 10),

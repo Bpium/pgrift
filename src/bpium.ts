@@ -14,11 +14,12 @@ import { log } from "./utils";
 export async function updateBpiumSchema(recordId: number, db: string): Promise<void> {
   if (!CONFIG.bpium) return;
 
-  const { apiBase, catalogId, schemaName, login, password, timezoneOffset } = CONFIG.bpium;
+  const { apiBase, catalogId, login, password, timezoneOffset } = CONFIG.bpium;
+
+  if (String(recordId) === "1" || db === "core") throw new Error("Cannot manipulate with service database!");
 
   const url =
-    `${apiBase}/api/v1/catalogs/${catalogId}/records/${recordId}` +
-    `?timezoneOffset=${timezoneOffset}&skipPrevId=true`;
+    `${apiBase}/api/v1/catalogs/${catalogId}/records/${recordId}` + `?timezoneOffset=${timezoneOffset}&skipPrevId=true`;
 
   const auth = Buffer.from(`${login}:${password}`).toString("base64");
 
@@ -30,7 +31,7 @@ export async function updateBpiumSchema(recordId: number, db: string): Promise<v
     },
     body: JSON.stringify({
       values: {
-        $schema: [schemaName],
+        $schema: [db],
         $database: [CONFIG.target.database],
       },
     }),
