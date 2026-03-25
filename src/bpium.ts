@@ -28,7 +28,12 @@ export async function updateBpiumSchema(recordId: number, db: string): Promise<v
       Authorization: `Basic ${auth}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ values: { $schema: [schemaName] } }),
+    body: JSON.stringify({
+      values: {
+        $schema: [schemaName],
+        $database: [CONFIG.target.database],
+      },
+    }),
   });
 
   if (!res.ok) {
