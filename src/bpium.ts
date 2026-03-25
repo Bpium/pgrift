@@ -1,4 +1,4 @@
-import { CONFIG } from "./config";
+import { buildConnectionString, CONFIG } from "./config";
 import { log } from "./utils";
 
 /**
@@ -32,7 +32,7 @@ export async function updateBpiumSchema(recordId: number, db: string): Promise<v
     body: JSON.stringify({
       values: {
         $schema: [db],
-        $database: [CONFIG.target.database],
+        $database: [buildConnectionString(CONFIG.target)],
       },
     }),
   });
