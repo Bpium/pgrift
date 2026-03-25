@@ -129,6 +129,10 @@ export const CONFIG = {
         login: process.env.BPIUM_LOGIN ?? "",
         password: process.env.BPIUM_PASSWORD ?? "",
         timezoneOffset: parseInt(process.env.BPIUM_TIMEZONE_OFFSET ?? "180", 10),
+        /** JSON object for $version field, e.g. {"catalogId":"$apiTags","recordId":"421","recordTitle":"v3.1.1",...} */
+        apiVersion: process.env.BPIUM_API_VERSION_JSON
+          ? JSON.parse(process.env.BPIUM_API_VERSION_JSON)
+          : null,
       }
     : null,
 };

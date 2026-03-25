@@ -1,46 +1,59 @@
 import { buildConnectionString, CONFIG } from "./config";
 import { log } from "./utils";
 
-/**
- * Sends a PATCH request to the Bpium admin API to update the schema field
- * for a given record.
- *
- * Only runs if BPIUM_API_BASE, BPIUM_LOGIN, BPIUM_PASSWORD, BPIUM_CATALOG_ID,
- * and BPIUM_SCHEMA_NAME are all set in the environment.
- *
- * @param recordId - The Bpium record ID (from db-list.json `id` field)
- * @param db       - Database name (used only for logging)
- */
-export async function updateBpiumSchema(recordId: number, db: string): Promise<void> {
-  if (!CONFIG.bpium) return;
+function buildBpiumUrl(recordId: number): string {
+  const { apiBase, catalogId, timezoneOffset } = CONFIG.bpium!;
+  return `${apiBase}/api/v1/catalogs/${catalogId}/records/${recordId}?timezoneOffset=${timezoneOffset}&skipPrevId=true`;
+}
 
-  const { apiBase, catalogId, login, password, timezoneOffset } = CONFIG.bpium;
+function buildAuthHeader(): string {
+  const { login, password } = CONFIG.bpium!;
+  return `Basic ${Buffer.from(`${login}:${password}`).toString("base64")}`;
+}
 
-  if (String(recordId) === "1" || db === "core") throw new Error("Cannot manipulate with service database!");
-
-  const url =
-    `${apiBase}/api/v1/catalogs/${catalogId}/records/${recordId}` + `?timezoneOffset=${timezoneOffset}&skipPrevId=true`;
-
-  const auth = Buffer.from(`${login}:${password}`).toString("base64");
-
-  const res = await fetch(url, {
+async function bpiumPatch(recordId: number, values: Record<string, unknown>): Promise<void> {
+  const res = await fetch(buildBpiumUrl(recordId), {
     method: "PATCH",
     headers: {
-      Authorization: `Basic ${auth}`,
+      Authorization: buildAuthHeader(),
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      values: {
-        $schema: [db],
-        $database: [buildConnectionString(CONFIG.target)],
-      },
-    }),
+    body: JSON.stringify({ values }),
   });
 
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Bpium API ${res.status}: ${text.slice(0, 200)}`);
   }
+}
 
-  log("info", `bpium schema updated for ${db} (record #${recordId})`);
+/**
+ * Disables the API version for a record before migration starts.
+ * Sets $version to [] so the domain becomes temporarily unavailable.
+ */
+export async function disableBpiumVersion(recordId: number, db: string): Promise<void> {
+  if (!CONFIG.bpium) return;
+
+  await bpiumPatch(recordId, { $version: [] });
+  log("info", `  [${db}] bpium api version disabled (record #${recordId})`);
+}
+
+/**
+ * After migration: updates $schema, $database and restores $version.
+ */
+export async function updateBpiumSchema(recordId: number, db: string): Promise<void> {
+  if (!CONFIG.bpium) return;
+
+  if (String(recordId) === "1" || db === "core") throw new Error("Cannot manipulate with service database!");
+
+  const { apiVersion } = CONFIG.bpium;
+
+  const values: Record<string, unknown> = {
+    $schema: [db],
+    $database: [buildConnectionString(CONFIG.target)],
+    $version: apiVersion ? [apiVersion] : [],
+  };
+
+  await bpiumPatch(recordId, values);
+  log("info", `  [${db}] bpium schema updated (record #${recordId})`);
 }
