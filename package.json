@@ -33,7 +33,11 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "build": "tsc -p tsconfig.json",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop pgrift",
+    "pm2:logs": "pm2 logs pgrift",
+    "pm2:status": "pm2 status"
   },
   "dependencies": {
     "chalk": "^4.1.2",
