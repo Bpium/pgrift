@@ -256,17 +256,31 @@ export async function migrateTenant(dbName: string, sourceOverride?: ClientConfi
       );
     });
 
-    // 2. Dump + schema rename (strategy-dependent)
+    // 2. Check if schema already exists in target
+    const existsInTarget = await withClient(tgt, async (client) => {
+      const { rows } = await client.query<{ schema_name: string }>(
+        `SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1`,
+        [dbName],
+      );
+      return rows.length > 0;
+    });
+
+    if (existsInTarget) {
+      log("warn", `  [${dbName}] schema already exists in target — skipping to prevent data loss`);
+      return;
+    }
+
+    // 3. Dump + schema rename (strategy-dependent)
     if (CONFIG.schemaRenameStrategy === "rename") {
       await dumpWithRename(dbName, dbNameEsc, src, srcPw, finalDumpFile);
     } else {
       await dumpWithRewrite(dbName, dbNameEsc, src, srcPw, finalDumpFile);
     }
 
-    // 3. Prepare target DB: drop old schema (if exists), ensure extensions
+    // 4. Prepare target DB: drop old schema (if exists), ensure extensions
     log("info", `  [${dbName}] restoring to target database ${tgt.database}...`);
     await withClient(tgt, async (client) => {
-      await client.query(`DROP SCHEMA IF EXISTS "${dbNameEsc}" CASCADE`);
+      // await client.query(`DROP SCHEMA IF EXISTS "${dbNameEsc}" CASCADE`);
 
       for (const extname of extensions) {
         try {
@@ -277,7 +291,7 @@ export async function migrateTenant(dbName: string, sourceOverride?: ClientConfi
       }
     });
 
-    // 4. Restore dump into target
+    // 5. Restore dump into target
     exec(
       ["psql", pgFlags(tgt), `-v ON_ERROR_STOP=1`, `-f "${finalDumpFile}"`].join(" "),
       tgtPw,
