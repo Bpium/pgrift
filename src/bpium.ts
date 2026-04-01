@@ -39,6 +39,17 @@ export async function disableBpiumVersion(recordId: number, db: string): Promise
 }
 
 /**
+ * Restores $version from env without touching $schema/$database.
+ * Called when migration fails so the tenant isn't left with an empty version.
+ */
+export async function restoreBpiumVersion(recordId: number, db: string): Promise<void> {
+  if (!CONFIG.bpium) return;
+  const { apiVersion } = CONFIG.bpium;
+  await bpiumPatch(recordId, { $version: apiVersion ? [apiVersion] : [] });
+  log("info", `  [${db}] bpium version restored after failure (record #${recordId})`);
+}
+
+/**
  * After migration: updates $schema, $database and restores $version.
  */
 export async function updateBpiumSchema(recordId: number, db: string): Promise<void> {

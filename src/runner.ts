@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import * as readline from "node:readline";
-import { disableBpiumVersion, updateBpiumSchema } from "./bpium";
+import { disableBpiumVersion, restoreBpiumVersion, updateBpiumSchema } from "./bpium";
 import { CONFIG } from "./config";
 import { ensureTargetDatabase, getTenants, getTenantsFromFile } from "./db";
 import { migrateTenant } from "./migrate-tenant";
@@ -36,15 +36,22 @@ async function runBatch(tenants: TenantEntry[], state: State): Promise<void> {
         await disableBpiumVersion(bpiumId, db);
       }
 
-      await migrateTenant(db, source);
+      try {
+        await migrateTenant(db, source);
 
-      const { ok, reasons } = await verifyMigration(db, source);
-      if (!ok) {
-        throw new Error(`verification failed: ${reasons.join(" | ")}`);
-      }
+        const { ok, reasons } = await verifyMigration(db, source);
+        if (!ok) {
+          throw new Error(`verification failed: ${reasons.join(" | ")}`);
+        }
 
-      if (bpiumId !== undefined) {
-        await updateBpiumSchema(bpiumId, db);
+        if (bpiumId !== undefined) {
+          await updateBpiumSchema(bpiumId, db);
+        }
+      } catch (err) {
+        if (bpiumId !== undefined) {
+          await restoreBpiumVersion(bpiumId, db);
+        }
+        throw err;
       }
 
       return db;
