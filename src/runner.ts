@@ -126,11 +126,11 @@ export async function runMigration(): Promise<void> {
   }
 
   // 3. User confirmation (skip in dry-run? still ask so user sees the plan)
-  const confirmed = await askConfirm(`Run migration${CONFIG.dryRun ? " (DRY RUN)" : ""}? (Y/N): `);
-  if (!confirmed) {
-    log("info", "Aborted.");
-    return;
-  }
+  // const confirmed = await askConfirm(`Run migration${CONFIG.dryRun ? " (DRY RUN)" : ""}? (Y/N): `);
+  // if (!confirmed) {
+  //   log("info", "Aborted.");
+  //   return;
+  // }
 
   registerShutdownHandlers();
 

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from urllib.parse import urlparse
+from typing import Optional, List, Tuple, Dict
 
 script_dir = Path(__file__).resolve().parent
 
@@ -11,7 +12,7 @@ with open(script_dir / "data.json", "r", encoding="utf-8") as file:
     source_data = json.load(file)
 
 
-def extract_db_name(connection_string: str) -> str | None:
+def extract_db_name(connection_string: str) -> Optional[str]:
     """Extract database name from a PostgreSQL connection string."""
     try:
         return urlparse(connection_string).path.lstrip("/") or None
@@ -19,14 +20,15 @@ def extract_db_name(connection_string: str) -> str | None:
         return None
 
 
-def build_entries(items: list) -> tuple[list[str], list[dict]]:
+def build_entries(items: List[Dict]) -> Tuple[List[str], List[Dict]]:
     """
     Returns two lists from a source array:
       - connections: legacy flat list of connection strings
-      - entries:     new format [{ id, dbName }] (only items that have both $database and id)
+      - entries:     new format [{ id, dbName }] 
+                     (only items that have both $database and id)
     """
-    connections = []
-    entries = []
+    connections: List[str] = []
+    entries: List[Dict] = []
 
     for item in items:
         conn = item.get("$database")

@@ -59,9 +59,15 @@ export async function updateBpiumSchema(recordId: number, db: string): Promise<v
 
   const { apiVersion } = CONFIG.bpium;
 
+  const connectionString = buildConnectionString(CONFIG.target);
+  const connectionStringWithSsl = connectionString.endsWith("?ssl=true")
+    ? connectionString
+    : connectionString + "?ssl=true";
+
+
   const values: Record<string, unknown> = {
-    $schema: [db],
-    $database: [buildConnectionString(CONFIG.target)],
+    $schema: db,
+    $database: connectionStringWithSsl,
     $version: apiVersion ? [apiVersion] : [],
   };
 
