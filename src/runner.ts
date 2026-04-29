@@ -29,57 +29,115 @@ function registerShutdownHandlers(): void {
 // Batch runner
 // ---------------------------------------------------------------------------
 
-async function runBatch(tenants: TenantEntry[], state: State): Promise<void> {
-  const results = await Promise.allSettled(
-    tenants.map(async ({ db, source, bpiumId }) => {
-      if (bpiumId !== undefined) {
-        await disableBpiumVersion(bpiumId, db);
-      }
+async function sleep(ms: number): Promise<void> {
+  const stepMs = 1000;
+  let remainingMs = ms;
 
-      try {
-        await migrateTenant(db, source);
+  while (remainingMs > 0 && !shuttingDown) {
+    await new Promise((resolve) => setTimeout(resolve, Math.min(stepMs, remainingMs)));
+    remainingMs -= stepMs;
+  }
+}
 
-        const { ok, reasons } = await verifyMigration(db, source);
-        if (!ok) {
-          throw new Error(`verification failed: ${reasons.join(" | ")}`);
-        }
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
-        if (bpiumId !== undefined) {
-          await updateBpiumSchema(bpiumId, db);
-        }
-      } catch (err) {
-        if (bpiumId !== undefined) {
-          await restoreBpiumVersion(bpiumId, db);
-        }
-        throw err;
-      }
+async function runTenantOnce(tenant: TenantEntry): Promise<string> {
+  const { db, source, bpiumId } = tenant;
 
-      return db;
-    }),
-  );
-
-  for (let i = 0; i < results.length; i++) {
-    const db = tenants[i].db;
-    const result = results[i];
-
-    if (result.status === "fulfilled") {
-      state.completed.push(db);
-      // Remove from failed list if it previously failed and is now done
-      state.failed = state.failed.filter((f: FailedEntry) => f.db !== db);
-      log("done", `${db} (${state.completed.length} total)`);
-    } else {
-      const message =
-        result.reason instanceof Error ? result.reason.message : String(result.reason);
-
-      const existing = state.failed.find((f: FailedEntry) => f.db === db);
-      if (existing) {
-        existing.attempts++;
-        existing.error = message;
-      } else {
-        state.failed.push({ db, error: message, attempts: 1 });
-      }
-      log("fail", `${db}: ${message.slice(0, 300)}`);
+  try {
+    if (bpiumId !== undefined) {
+      await disableBpiumVersion(bpiumId, db);
     }
+
+    await migrateTenant(db, source);
+
+    const { ok, reasons } = await verifyMigration(db, source);
+    if (!ok) {
+      throw new Error(`verification failed: ${reasons.join(" | ")}`);
+    }
+
+    if (bpiumId !== undefined) {
+      await updateBpiumSchema(bpiumId, db);
+    }
+
+    return db;
+  } catch (err) {
+    if (bpiumId !== undefined) {
+      try {
+        await restoreBpiumVersion(bpiumId, db);
+      } catch (restoreErr) {
+        log(
+          "error",
+          `  [${db}] bpium version restore failed: ${getErrorMessage(restoreErr).slice(0, 300)}`,
+        );
+      }
+    }
+    throw err;
+  }
+}
+
+async function pauseRuntimeAfterFailure(): Promise<void> {
+  const delaySeconds = Math.round(CONFIG.retryDelayMs / 1000);
+  log(
+    "warn",
+    `failure detected — pausing entire runtime for ${delaySeconds}s before continuing...`,
+  );
+  await sleep(CONFIG.retryDelayMs);
+}
+
+function markTenantDone(db: string, state: State): void {
+  state.completed.push(db);
+  // Remove from failed list if it previously failed and is now done
+  state.failed = state.failed.filter((f: FailedEntry) => f.db !== db);
+  log("done", `${db} (${state.completed.length} total)`);
+}
+
+function markTenantFailed(db: string, err: unknown, state: State): number {
+  const message = getErrorMessage(err);
+  const existing = state.failed.find((f: FailedEntry) => f.db === db);
+  if (existing) {
+    existing.attempts++;
+    existing.error = message;
+  } else {
+    state.failed.push({ db, error: message, attempts: 1 });
+  }
+
+  const attempts = state.failed.find((f: FailedEntry) => f.db === db)?.attempts ?? 1;
+  log("fail", `${db} (${attempts}/${CONFIG.maxRetries} attempts): ${message.slice(0, 300)}`);
+  return attempts;
+}
+
+async function runTenantUntilDoneOrExhausted(tenant: TenantEntry, state: State): Promise<void> {
+  const { db } = tenant;
+
+  while (!shuttingDown) {
+    try {
+      await runTenantOnce(tenant);
+      markTenantDone(db, state);
+      return;
+    } catch (err) {
+      const attempts = markTenantFailed(db, err, state);
+      await pauseRuntimeAfterFailure();
+
+      if (shuttingDown) {
+        return;
+      }
+
+      if (attempts >= CONFIG.maxRetries) {
+        return;
+      }
+
+      log("info", `  [${db}] retry attempt ${attempts + 1}/${CONFIG.maxRetries}`);
+    }
+  }
+}
+
+async function runBatch(tenants: TenantEntry[], state: State): Promise<void> {
+  for (const tenant of tenants) {
+    if (shuttingDown) return;
+    await runTenantUntilDoneOrExhausted(tenant, state);
   }
 }
 
@@ -87,7 +145,7 @@ async function runBatch(tenants: TenantEntry[], state: State): Promise<void> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function askConfirm(prompt: string): Promise<boolean> {
+function _askConfirm(prompt: string): Promise<boolean> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     rl.question(prompt, (answer) => {
@@ -156,19 +214,22 @@ export async function runMigration(): Promise<void> {
     state.failed.filter((f) => f.attempts >= CONFIG.maxRetries).map((f) => f.db),
   );
 
-  const remaining = allTenants.filter(
-    ({ db }) => !completedSet.has(db) && !exhaustedSet.has(db),
-  );
+  const remaining = allTenants.filter(({ db }) => !completedSet.has(db) && !exhaustedSet.has(db));
 
   log(
     "info",
     `total: ${allTenants.length} | done: ${state.completed.length} | ` +
       `remaining: ${remaining.length} | failed: ${state.failed.length}` +
-      (exhaustedSet.size > 0 ? ` | exhausted (≥${CONFIG.maxRetries} attempts): ${exhaustedSet.size}` : ""),
+      (exhaustedSet.size > 0
+        ? ` | exhausted (≥${CONFIG.maxRetries} attempts): ${exhaustedSet.size}`
+        : ""),
   );
 
   if (exhaustedSet.size > 0) {
-    log("warn", `skipping ${exhaustedSet.size} tenant(s) that exceeded MAX_RETRIES=${CONFIG.maxRetries}:`);
+    log(
+      "warn",
+      `skipping ${exhaustedSet.size} tenant(s) that exceeded MAX_RETRIES=${CONFIG.maxRetries}:`,
+    );
     for (const db of exhaustedSet) {
       const entry = state.failed.find((f) => f.db === db);
       log("fail", `  ${db} (${entry?.attempts} attempts): ${entry?.error?.slice(0, 200)}`);

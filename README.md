@@ -86,8 +86,9 @@ SCHEMA_RENAME_STRATEGY=rename
 | `SOURCE_DISCOVERY_DATABASE` | `postgres` | Database to connect to on the source server when discovering tenants via `pg_database`. On managed platforms (e.g. Yandex Cloud) the system `postgres` database is often inaccessible — set this to any existing DB the user has access to |
 | `DUMP_DIR` | `/tmp/pg_migration_dumps` | Temp directory for dump files |
 | `STATE_FILE` | `./migration-state.json` | Resume state file |
-| `CONCURRENCY` | `10` | Number of tenants to process in parallel |
-| `MAX_RETRIES` | `3` | Max attempts per tenant before it is skipped for the rest of the run. Exhausted tenants are clearly reported and can be retried manually |
+| `CONCURRENCY` | `10` | Batch size for progress/state saves. Tenant migrations run one by one so any failure can pause the runtime |
+| `MAX_RETRIES` | `3` | Max attempts per tenant before it is skipped for the rest of the run |
+| `RETRY_DELAY_MS` | `120000` | Global pause after any failed attempt before the runner continues. Default: 2 minutes |
 | `DRY_RUN` | `false` | Print which tenants would be migrated without touching any data |
 | `EXEC_TIMEOUT_MS` | `0` | Hard process timeout for pg_dump / psql (ms). `0` = no timeout (default). PostgreSQL-level timeouts are already disabled via `PGOPTIONS`. Set this only if you want a safety kill for completely hung processes |
 | `SKIP_CHECKSUM_ABOVE_ROWS` | — | Skip MD5 checksum for tables with more rows than this |
